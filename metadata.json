@@ -1,0 +1,8 @@
+{
+  "name": "Remix SongScroll",
+  "description": "SongScroll music lyrics and chord player with auto-scroll, half-step transposition, top-right animated metronome, and local drive repository directory support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

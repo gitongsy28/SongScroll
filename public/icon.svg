@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a" />
+      <stop offset="100%" stop-color="#020617" />
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#d97706" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" stroke="#f59e0b" stroke-width="12" stroke-opacity="0.3"/>
+  <!-- Musical Note & Chords Icon -->
+  <g transform="translate(106, 96)">
+    <!-- Chord bracket notation symbol -->
+    <path d="M 40 40 L 10 40 L 10 280 L 40 280" fill="none" stroke="#f59e0b" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 260 40 L 290 40 L 290 280 L 260 280" fill="none" stroke="#f59e0b" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <!-- Music note -->
+    <path d="M 90 220 C 90 190, 115 165, 145 165 C 160 165, 172 172, 180 182 L 180 60 L 240 40 L 240 180 C 240 210, 215 235, 185 235 C 155 235, 130 210, 130 180" fill="none"/>
+    <ellipse cx="115" cy="225" rx="35" ry="25" transform="rotate(-20 115 225)" fill="url(#accent)"/>
+    <ellipse cx="215" cy="195" rx="35" ry="25" transform="rotate(-20 215 195)" fill="url(#accent)"/>
+    <rect x="140" y="70" width="16" height="150" fill="#f59e0b"/>
+    <rect x="240" y="40" width="16" height="150" fill="#f59e0b"/>
+    <polygon points="140,70 256,40 256,75 140,105" fill="#f59e0b"/>
+  </g>
+</svg>
