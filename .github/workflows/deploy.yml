@@ -1,9 +1,8 @@
-
 name: Deploy Vite App to GitHub Pages
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -19,32 +18,50 @@ jobs:
   deploy:
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps: deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Set up Node
+      - name: Setup Node.js Environment
         uses: actions/setup-node@v4
         with:
-          node-node-version: 20
-          cache: 'npm'
+          node-version: 20
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Install Dependencies
+        run: |
+          if [ -f "pnpm-lock.yaml" ]; then
+            corepack enable && corepack prepare pnpm@latest --activate
+            pnpm install
+          elif [ -f "yarn.lock" ]; then
+            corepack enable && corepack prepare yarn@stable --activate
+            yarn install
+          else
+            npm install
+          fi
 
-      - name: Build
-        run: npm run build
+      - name: Build Application Production Assets
+        run: |
+          if [ -f "pnpm-lock.yaml" ]; then
+            pnpm run build
+          elif [ -f "yarn.lock" ]; then
+            yarn run build
+          else
+            npm run build
+          fi
 
-      - name: Fix PWA Paths for GH Pages
+      - name: Create bypass configurations for PWA assets
         run: touch dist/.nojekyll
 
-      - name: Upload artifact
+      - name: Setup GitHub Pages Infrastructure
+        uses: actions/configure-pages@v4
+
+      - name: Upload Compiled Static Site Artifacts
         uses: actions/upload-pages-artifact@v3
         with:
           path: './dist'
 
-      - name: Deploy to GitHub Pages
+      - name: Execute Deployment to GitHub Pages Live Domain
         id: deployment
         uses: actions/deploy-pages@v4
