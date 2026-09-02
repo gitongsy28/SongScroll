@@ -1,7 +1,7 @@
 {
   "name": "Remix SongScroll - Auto-Scroll Lyric & Chord Reader",
   "short_name": "SongScroll",
-  "description": "SongScroll music lyrics and chord player with auto-scroll, half-step transposition, top-right animated metronome, and local drive repository directory support.",
+  "description": "SongScroll forc lyrics and chord player with auto-scroll, half-step transposition, top-right animated metronome, and local drive repository directory support.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
