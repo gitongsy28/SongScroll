@@ -1,14 +1,14 @@
 // Service Worker for SongScroll PWA
-const CACHE_NAME = 'songscroll-v1';
+const CACHE_NAME = 'songscroll-v2';
 const ASSETS_TO_CACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/manifest.webmanifest',
-  '/icon.svg',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/icon-maskable-512.png'
+  './',
+  './index.html',
+  './manifest.json',
+  './manifest.webmanifest',
+  './icon.svg',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-maskable-512.png'
 ];
 
 self.addEventListener('install', (event) => {

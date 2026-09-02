@@ -1,10 +1,10 @@
 {
-  "name": "Remix SongScroll - Auto-Scroll Lyric &amp; Chord Reader",
-  "short_name": "SongScroll2",
-  "description": "SongScroll forc lyrics and chord player with auto-scroll, half-step transposition, top-right animated metronome, and local drive repository directory support.",
-  "id": "/",
-  "start_url": "/",
-  "scope": "/",
+  "name": "Remix SongScroll - Auto-Scroll Lyric & Chord Reader",
+  "short_name": "SongScroll",
+  "description": "SongScroll music lyrics and chord player with auto-scroll, half-step transposition, top-right animated metronome, and local drive repository directory support.",
+  "id": "./",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "display_override": [
     "standalone",
@@ -24,25 +24,25 @@
   ],
   "icons": [
     {
-      "src": "/SongScroll/icon-192.png",
+      "src": "icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/SongScroll/icon-512.png",
+      "src": "icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/SongScroll/icon-maskable-512.png",
+      "src": "icon-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "/SongScroll/icon.svg",
+      "src": "icon.svg",
       "sizes": "512x512",
       "type": "image/svg+xml",
       "purpose": "any"
@@ -53,10 +53,10 @@
       "name": "Song Library",
       "short_name": "Library",
       "description": "Browse and search all saved ChordPro songs",
-      "url": "/",
+      "url": "./",
       "icons": [
         {
-          "src": "/SongScroll/icon-192.png",
+          "src": "icon-192.png",
           "sizes": "192x192"
         }
       ]

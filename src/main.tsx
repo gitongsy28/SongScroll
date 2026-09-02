@@ -4,16 +4,13 @@ import App from './App.tsx';
 import './index.css';
 
 // Register Service Worker for PWA support
-if ('serviceWorker' in navigator && process.env.NODE_ENV === 'production') {
+if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch((err) => {
+    const baseUrl = import.meta.env.BASE_URL || './';
+    const swPath = `${baseUrl.endsWith('/') ? baseUrl : baseUrl + '/'}sw.js`;
+    navigator.serviceWorker.register(swPath).catch((err) => {
       console.log('ServiceWorker registration note:', err);
     });
-  });
-} else if ('serviceWorker' in navigator) {
-  // In development, also register so PWABuilder scans against dev/preview URLs pass verification
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
 }
 
