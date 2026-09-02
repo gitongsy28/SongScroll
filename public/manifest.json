@@ -56,7 +56,7 @@
       "url": "/",
       "icons": [
         {
-          "src": "/icon-192.png",
+          "src": "/SongScroll/icon-192.png",
           "sizes": "192x192"
         }
       ]
