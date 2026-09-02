@@ -90,6 +90,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
   let artist = 'Unknown Artist';
   let subtitle = '';
   let key: string | undefined;
+  let era: string | undefined;
   let tempo: number | undefined;
   let timeSignature = '4/4';
   let capo: number | undefined;
@@ -138,6 +139,11 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
         case 'key':
         case 'k':
           key = value;
+          break;
+        case 'era':
+        case 'decade':
+        case 'year':
+          era = value;
           break;
         case 'tempo':
         case 'bpm': {
@@ -283,6 +289,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
     artist,
     subtitle,
     key,
+    era,
     tempo,
     timeSignature,
     capo,
@@ -303,6 +310,7 @@ export function serializeChordPro(parsed: ParsedChordPro, transposeSemitones: nu
   result.push(`{title: ${parsed.title}}`);
   if (parsed.artist) result.push(`{artist: ${parsed.artist}}`);
   if (parsed.subtitle) result.push(`{subtitle: ${parsed.subtitle}}`);
+  if (parsed.era) result.push(`{era: ${parsed.era}}`);
   
   if (parsed.key) {
     const newKey = transposeChord(parsed.key, transposeSemitones, preferSharps);
@@ -380,6 +388,7 @@ export function createSongFromChordPro(rawText: string, filePath?: string, fileN
     artist: parsed.artist,
     subtitle: parsed.subtitle,
     key: parsed.key,
+    era: parsed.era,
     tempo: parsed.tempo,
     timeSignature: parsed.timeSignature,
     capo: parsed.capo,

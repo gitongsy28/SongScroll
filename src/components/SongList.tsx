@@ -44,9 +44,9 @@ export const SongList: React.FC<SongListProps> = ({
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedKeyFilter, setSelectedKeyFilter] = useState<string>('ALL');
+  const [selectedEraFilter, setSelectedEraFilter] = useState<string>('ALL');
   const [selectedLetter, setSelectedLetter] = useState<string>('ALL');
-  const [sortBy, setSortBy] = useState<'artist' | 'title' | 'tempo-asc' | 'tempo-desc' | 'recent'>('artist');
-  const [layoutMode, setLayoutMode] = useState<'compact-grid' | 'rows'>('compact-grid');
+  const [sortBy, setSortBy] = useState<'artist' | 'title' | 'era' | 'tempo-asc' | 'tempo-desc' | 'recent'>('artist');
 
   // Extract all unique musical keys
   const availableKeys = useMemo(() => {
@@ -55,6 +55,15 @@ export const SongList: React.FC<SongListProps> = ({
       if (s.key) keys.add(s.key);
     });
     return Array.from(keys).sort();
+  }, [songs]);
+
+  // Extract all unique eras
+  const availableEras = useMemo(() => {
+    const eras = new Set<string>();
+    songs.forEach((s) => {
+      if (s.era) eras.add(s.era);
+    });
+    return Array.from(eras).sort();
   }, [songs]);
 
   // Extract available starting letters (A-Z)
@@ -88,9 +97,11 @@ export const SongList: React.FC<SongListProps> = ({
           !q ||
           song.title.toLowerCase().includes(q) ||
           song.artist.toLowerCase().includes(q) ||
+          (song.era && song.era.toLowerCase().includes(q)) ||
           (song.key && song.key.toLowerCase().includes(q));
 
         const matchesKey = selectedKeyFilter === 'ALL' || song.key === selectedKeyFilter;
+        const matchesEra = selectedEraFilter === 'ALL' || song.era === selectedEraFilter;
 
         const targetLetter = (sortBy === 'title' ? song.title : song.artist || song.title)
           .trim()
@@ -98,7 +109,7 @@ export const SongList: React.FC<SongListProps> = ({
           .toUpperCase();
         const matchesLetter = selectedLetter === 'ALL' || targetLetter === selectedLetter;
 
-        return matchesQuery && matchesKey && matchesLetter;
+        return matchesQuery && matchesKey && matchesEra && matchesLetter;
       })
       .sort((a, b) => {
         if (sortBy === 'artist') {
@@ -107,6 +118,11 @@ export const SongList: React.FC<SongListProps> = ({
         }
         if (sortBy === 'title') {
           return a.title.localeCompare(b.title);
+        }
+        if (sortBy === 'era') {
+          const eraA = a.era || '';
+          const eraB = b.era || '';
+          return eraA.localeCompare(eraB) || a.title.localeCompare(b.title);
         }
         if (sortBy === 'tempo-asc') {
           return (a.tempo || 0) - (b.tempo || 0);
@@ -119,7 +135,7 @@ export const SongList: React.FC<SongListProps> = ({
         }
         return 0;
       });
-  }, [songs, searchQuery, selectedKeyFilter, selectedLetter, sortBy]);
+  }, [songs, searchQuery, selectedKeyFilter, selectedEraFilter, selectedLetter, sortBy]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col selection:bg-amber-500 selection:text-slate-950">
@@ -222,8 +238,9 @@ export const SongList: React.FC<SongListProps> = ({
               )}
             </div>
 
-            {/* Key Filter */}
-            <div className="flex items-center gap-2">
+            {/* Filters: Key, Era, Sort */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Key Filter */}
               <div className="relative shrink-0">
                 <select
                   id="key-filter-select"
@@ -241,6 +258,26 @@ export const SongList: React.FC<SongListProps> = ({
                 <Filter className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
 
+              {/* Era Filter */}
+              {availableEras.length > 0 && (
+                <div className="relative shrink-0">
+                  <select
+                    id="era-filter-select"
+                    value={selectedEraFilter}
+                    onChange={(e) => setSelectedEraFilter(e.target.value)}
+                    className="px-2.5 py-2 pr-7 bg-slate-950 border border-slate-800 focus:border-amber-400 rounded-lg text-xs text-slate-300 focus:outline-none appearance-none cursor-pointer"
+                  >
+                    <option value="ALL">All Eras</option>
+                    {availableEras.map((era) => (
+                      <option key={era} value={era}>
+                        Era: {era}
+                      </option>
+                    ))}
+                  </select>
+                  <Filter className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              )}
+
               {/* Sort Dropdown */}
               <div className="relative shrink-0">
                 <select
@@ -251,35 +288,12 @@ export const SongList: React.FC<SongListProps> = ({
                 >
                   <option value="artist">Sort: Artist (A-Z)</option>
                   <option value="title">Sort: Title (A-Z)</option>
+                  <option value="era">Sort: Era</option>
                   <option value="tempo-asc">Sort: Tempo (Slow to Fast)</option>
                   <option value="tempo-desc">Sort: Tempo (Fast to Slow)</option>
                   <option value="recent">Sort: Recently Added</option>
                 </select>
                 <SlidersHorizontal className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
-
-              {/* Layout Mode Toggle */}
-              <div className="flex items-center bg-slate-950 p-0.5 rounded-lg border border-slate-800 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setLayoutMode('compact-grid')}
-                  className={`p-1.5 rounded-md transition-colors ${
-                    layoutMode === 'compact-grid' ? 'bg-slate-800 text-amber-300' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title="Multi-column compact grid (fits maximum songs per screen)"
-                >
-                  <LayoutGrid className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLayoutMode('rows')}
-                  className={`p-1.5 rounded-md transition-colors ${
-                    layoutMode === 'rows' ? 'bg-slate-800 text-amber-300' : 'text-slate-400 hover:text-slate-200'
-                  }`}
-                  title="Full-width rows"
-                >
-                  <List className="w-3.5 h-3.5" />
-                </button>
               </div>
             </div>
           </div>
@@ -329,156 +343,97 @@ export const SongList: React.FC<SongListProps> = ({
           </div>
         </section>
 
-        {/* High-Density Simplified Song List */}
+        {/* 1 Song Per Row List */}
         {filteredSongs.length > 0 ? (
-          layoutMode === 'compact-grid' ? (
-            /* Multi-column Compact Grid - Maximizes visible songs per screen */
-            <div 
-              id="songs-grid"
-              className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2"
-            >
-              {filteredSongs.map((song, index) => (
-                <div
-                  key={song.id}
-                  id={`song-card-${song.id}`}
-                  onClick={() => onSelectSong(song)}
-                  className="group relative bg-slate-900/80 hover:bg-slate-900 border border-slate-800/80 hover:border-amber-500/50 rounded-xl px-3 py-2.5 shadow-sm hover:shadow-md cursor-pointer transition-all duration-150 flex items-center justify-between gap-2.5"
-                >
-                  {/* Left: Song Number & Artist + Title */}
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <div className="w-6 h-6 rounded-md bg-slate-950 group-hover:bg-amber-500/20 text-slate-400 group-hover:text-amber-300 flex items-center justify-center text-[10px] font-mono font-bold shrink-0 transition-colors">
-                      <span className="group-hover:hidden">{index + 1}</span>
-                      <Play className="w-3 h-3 fill-current hidden group-hover:block" />
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      {/* Artist Name */}
-                      <p className="text-[11px] font-semibold text-slate-400 group-hover:text-amber-300/90 truncate transition-colors leading-tight">
-                        {song.artist || 'Unknown Artist'}
-                      </p>
-                      {/* Song Name */}
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-100 group-hover:text-amber-300 truncate leading-snug">
-                        {song.title}
-                      </h3>
-                    </div>
-                  </div>
-
-                  {/* Right: Key Badge & Quick Actions on Hover */}
-                  <div className="flex items-center gap-1 shrink-0">
-                    {song.key && (
-                      <span className="px-1.5 py-0.5 bg-slate-950 border border-slate-800 text-sky-300 rounded text-[10px] font-mono font-semibold">
-                        {song.key}
-                      </span>
-                    )}
-
-                    <div 
-                      className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => onEditSong(song)}
-                        className="p-1 text-slate-400 hover:text-amber-300 hover:bg-slate-800 rounded transition-colors"
-                        title="Edit ChordPro source"
-                      >
-                        <Edit className="w-3 h-3" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm(`Delete "${song.title}"?`)) onDeleteSong(song.id);
-                        }}
-                        className="p-1 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded transition-colors"
-                        title="Delete song"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            /* Compact Single/Dual Rows View */
-            <div 
-              id="songs-list-table"
-              className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-md divide-y divide-slate-800/80"
-            >
-              {filteredSongs.map((song, index) => (
-                <div
-                  key={song.id}
-                  id={`song-row-${song.id}`}
-                  onClick={() => onSelectSong(song)}
-                  className="px-3.5 py-2.5 flex items-center justify-between hover:bg-slate-800/60 cursor-pointer transition-colors group gap-3"
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="text-xs font-mono font-bold text-slate-400 w-5 text-right shrink-0">
+          <div 
+            id="songs-list-table"
+            className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-md divide-y divide-slate-800/80"
+          >
+            {filteredSongs.map((song, index) => (
+              <div
+                key={song.id}
+                id={`song-row-${song.id}`}
+                onClick={() => onSelectSong(song)}
+                className="px-3.5 sm:px-4 py-3 flex items-center justify-between hover:bg-slate-800/70 active:bg-slate-800 cursor-pointer transition-colors group gap-3"
+              >
+                {/* Left: Number & Play Icon + Artist & Title */}
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <div className="w-8 h-8 rounded-lg bg-slate-950 border border-slate-800 group-hover:border-amber-500/50 group-hover:bg-amber-500/10 flex items-center justify-center shrink-0 transition-colors">
+                    <span className="text-xs font-mono font-bold text-slate-400 group-hover:hidden">
                       {index + 1}
                     </span>
+                    <Play className="w-3.5 h-3.5 text-amber-400 fill-amber-400 hidden group-hover:block" />
+                  </div>
 
-                    <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400 group-hover:bg-amber-500 group-hover:text-slate-950 transition-all shrink-0">
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                    </div>
-
-                    <div className="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center sm:gap-4">
-                      {/* Artist */}
-                      <span className="text-xs font-semibold text-slate-400 group-hover:text-amber-200/90 truncate sm:w-48 shrink-0">
+                  <div className="min-w-0 flex-1 flex flex-col sm:flex-row sm:items-center sm:gap-6">
+                    {/* Artist Name */}
+                    <div className="sm:w-56 shrink-0 truncate">
+                      <span className="text-xs sm:text-sm font-semibold text-slate-400 group-hover:text-amber-200/90 transition-colors">
                         {song.artist || 'Unknown Artist'}
                       </span>
-                      {/* Song Title */}
-                      <h3 className="text-xs sm:text-sm font-bold text-slate-100 group-hover:text-amber-300 truncate flex-1">
+                    </div>
+
+                    {/* Song Title & Era */}
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      <h3 className="text-sm sm:text-base font-bold text-slate-100 group-hover:text-amber-300 truncate transition-colors">
                         {song.title}
                       </h3>
+                      {song.era && (
+                        <span className="px-1.5 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded text-[10px] sm:text-xs font-mono font-bold shrink-0">
+                          {song.era}
+                        </span>
+                      )}
                     </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    {song.key && (
-                      <span className="px-1.5 py-0.5 bg-slate-950 border border-slate-800 text-sky-300 rounded text-[10px] font-mono font-semibold">
-                        Key: {song.key}
-                      </span>
-                    )}
-                    {song.tempo && (
-                      <span className="hidden sm:inline-block px-1.5 py-0.5 bg-slate-950 border border-slate-800 text-amber-300 rounded text-[10px] font-mono">
-                        {song.tempo} BPM
-                      </span>
-                    )}
-
-                    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        onClick={() => downloadSongFile(song)}
-                        className="p-1.5 text-slate-400 hover:text-slate-200 rounded hover:bg-slate-800 transition-colors"
-                        title="Download .cho file"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onEditSong(song)}
-                        className="p-1.5 text-slate-400 hover:text-amber-300 rounded hover:bg-slate-800 transition-colors"
-                        title="Edit ChordPro"
-                      >
-                        <Edit className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm(`Delete "${song.title}"?`)) onDeleteSong(song.id);
-                        }}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 rounded hover:bg-slate-800 transition-colors"
-                        title="Delete song"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-300 transition-colors" />
                   </div>
                 </div>
-              ))}
-            </div>
-          )
+
+                {/* Right: Key, Tempo, Actions, Chevron */}
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                  {song.key && (
+                    <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 text-sky-300 rounded-md text-[11px] font-mono font-semibold">
+                      Key {song.key}
+                    </span>
+                  )}
+                  {song.tempo && (
+                    <span className="hidden sm:inline-block px-2 py-0.5 bg-slate-950 border border-slate-800 text-amber-300 rounded-md text-[11px] font-mono">
+                      {song.tempo} BPM
+                    </span>
+                  )}
+
+                  <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => downloadSongFile(song)}
+                      className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors"
+                      title="Download .cho file"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onEditSong(song)}
+                      className="p-1.5 text-slate-400 hover:text-amber-300 hover:bg-slate-800 rounded-lg transition-colors"
+                      title="Edit ChordPro"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Delete "${song.title}"?`)) onDeleteSong(song.id);
+                      }}
+                      className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors"
+                      title="Delete song"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-amber-400 group-hover:translate-x-0.5 transition-all" />
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <div 
             id="empty-songs-state"

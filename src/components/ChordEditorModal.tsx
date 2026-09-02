@@ -68,6 +68,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
       artist: parsed.artist || 'Unknown Artist',
       subtitle: parsed.subtitle,
       key: parsed.key,
+      era: parsed.era,
       tempo: parsed.tempo || 100,
       timeSignature: parsed.timeSignature || '4/4',
       capo: parsed.capo,
@@ -164,6 +165,13 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onClick={() => handleInsertDirective('{era: 90s}')}
+              className="px-2 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 rounded font-mono shrink-0"
+            >
+              {'{era: 90s}'}
+            </button>
+            <button
+              type="button"
               onClick={() => handleInsertDirective('{key: G}')}
               className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono shrink-0"
             >
@@ -224,9 +232,17 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
               className="w-full h-full p-6 bg-slate-950 overflow-y-auto space-y-4"
             >
               <div className="border-b border-slate-800 pb-3">
-                <h1 className="text-xl font-bold text-slate-100">{parsed.title}</h1>
+                <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                  {parsed.title}
+                  {parsed.era && (
+                    <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-md text-xs font-mono font-bold">
+                      {parsed.era}
+                    </span>
+                  )}
+                </h1>
                 <p className="text-sm text-slate-400">{parsed.artist}</p>
                 <div className="flex gap-3 mt-2 text-xs font-mono text-amber-400">
+                  {parsed.era && <span>Era: {parsed.era}</span>}
                   {parsed.key && <span>Key: {parsed.key}</span>}
                   <span>Tempo: {parsed.tempo} BPM</span>
                   <span>Time: {parsed.timeSignature}</span>

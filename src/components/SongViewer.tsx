@@ -65,6 +65,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const animationFrameRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
+  const exactScrollTopRef = useRef<number>(0);
   const isScrollingRef = useRef<boolean>(isScrolling);
   isScrollingRef.current = isScrolling;
 
@@ -95,17 +96,20 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     };
   }, []);
 
-  // Update scroll progress on manual scroll
+  // Update scroll progress on manual scroll & sync exact scroll position
   const handleScrollUpdate = useCallback(() => {
     if (!containerRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+    if (!isScrollingRef.current) {
+      exactScrollTopRef.current = scrollTop;
+    }
     const maxScroll = scrollHeight - clientHeight;
     if (maxScroll > 0) {
       setScrollProgress(Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100)));
     }
   }, []);
 
-  // Auto-scroll loop using high-precision requestAnimationFrame
+  // Auto-scroll loop using high-precision requestAnimationFrame with sub-pixel accumulator
   useEffect(() => {
     if (!isScrolling) {
       if (animationFrameRef.current) {
@@ -116,19 +120,30 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       return;
     }
 
+    // Initialize exact scroll top reference when starting scroll
+    if (containerRef.current) {
+      exactScrollTopRef.current = containerRef.current.scrollTop;
+    }
+
     const scrollStep = (timestamp: number) => {
       if (!lastTimestampRef.current) {
         lastTimestampRef.current = timestamp;
       }
-      const deltaSeconds = (timestamp - lastTimestampRef.current) / 1000;
+      // Cap deltaSeconds to 0.1s to avoid huge jumps on tab switch
+      const deltaSeconds = Math.min((timestamp - lastTimestampRef.current) / 1000, 0.1);
       lastTimestampRef.current = timestamp;
 
       if (containerRef.current && isScrollingRef.current) {
         const scrollAmount = scrollSpeedRef.current * deltaSeconds;
-        containerRef.current.scrollTop += scrollAmount;
-        handleScrollUpdate();
+        exactScrollTopRef.current += scrollAmount;
+        containerRef.current.scrollTop = exactScrollTopRef.current;
 
         const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+        const maxScroll = scrollHeight - clientHeight;
+        if (maxScroll > 0) {
+          setScrollProgress(Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100)));
+        }
+
         if (scrollTop + clientHeight >= scrollHeight - 2) {
           // Reached bottom of song
           setIsScrolling(false);
@@ -148,7 +163,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isScrolling, handleScrollUpdate]);
+  }, [isScrolling]);
 
   // Keyboard Shortcuts: Spacebar to toggle scroll, PgUp/PgDn to reposition
   useEffect(() => {
@@ -186,6 +201,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const handleRestart = () => {
     if (containerRef.current) {
       containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      exactScrollTopRef.current = 0;
     }
     setScrollProgress(0);
   };
@@ -193,15 +209,25 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const handlePageUp = () => {
     if (containerRef.current) {
       const pageDistance = containerRef.current.clientHeight * 0.7;
-      containerRef.current.scrollBy({ top: -pageDistance, behavior: 'smooth' });
+      const target = Math.max(0, containerRef.current.scrollTop - pageDistance);
+      containerRef.current.scrollTo({ top: target, behavior: 'smooth' });
+      exactScrollTopRef.current = target;
     }
   };
 
   const handlePageDown = () => {
     if (containerRef.current) {
       const pageDistance = containerRef.current.clientHeight * 0.7;
-      containerRef.current.scrollBy({ top: pageDistance, behavior: 'smooth' });
+      const target = containerRef.current.scrollTop + pageDistance;
+      containerRef.current.scrollTo({ top: target, behavior: 'smooth' });
+      exactScrollTopRef.current = target;
     }
+  };
+
+  const handleSpeedChange = (newSpeed: number) => {
+    const clamped = Math.max(1, Math.min(150, newSpeed));
+    setScrollSpeed(clamped);
+    onUpdateSettings({ scrollSpeed: clamped });
   };
 
   const handleTransposeStep = (direction: 1 | -1) => {
@@ -316,9 +342,16 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           </button>
 
           <div className="min-w-0">
-            <h1 className="text-sm sm:text-base font-bold truncate leading-tight">
-              {parsed.title}
-            </h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm sm:text-base font-bold truncate leading-tight">
+                {parsed.title}
+              </h1>
+              {parsed.era && (
+                <span className="px-1.5 py-0.2 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded text-[10px] font-mono font-bold shrink-0">
+                  {parsed.era}
+                </span>
+              )}
+            </div>
             <p className="text-[11px] opacity-70 truncate">
               {parsed.artist}
             </p>
@@ -408,9 +441,16 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           {/* Song Header Info Card */}
           <div className="border-b border-slate-800/50 pb-4 flex flex-wrap items-baseline justify-between gap-3">
             <div>
-              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-                {parsed.title}
-              </h2>
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                  {parsed.title}
+                </h2>
+                {parsed.era && (
+                  <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-md text-xs sm:text-sm font-mono font-bold">
+                    {parsed.era}
+                  </span>
+                )}
+              </div>
               <p className="text-base sm:text-lg opacity-80 mt-0.5">
                 {parsed.artist}
               </p>
@@ -689,7 +729,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             <button
               id="scroll-speed-minus-btn"
               type="button"
-              onClick={() => setScrollSpeed((s) => Math.max(5, s - 5))}
+              onClick={() => handleSpeedChange(scrollSpeed <= 10 ? scrollSpeed - 1 : scrollSpeed - 5)}
               className="p-1 text-slate-400 hover:text-slate-200 active:bg-slate-800 rounded"
               title="Decrease scroll speed"
             >
@@ -699,24 +739,25 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             <input
               id="scroll-speed-slider"
               type="range"
-              min="5"
+              min="1"
               max="120"
+              step="1"
               value={scrollSpeed}
-              onChange={(e) => setScrollSpeed(parseInt(e.target.value, 10))}
+              onChange={(e) => handleSpeedChange(parseInt(e.target.value, 10) || 1)}
               className="w-16 sm:w-24 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
             />
 
             <button
               id="scroll-speed-plus-btn"
               type="button"
-              onClick={() => setScrollSpeed((s) => Math.min(120, s + 5))}
+              onClick={() => handleSpeedChange(scrollSpeed < 10 ? scrollSpeed + 1 : scrollSpeed + 5)}
               className="p-1 text-slate-400 hover:text-slate-200 active:bg-slate-800 rounded"
               title="Increase scroll speed"
             >
               <Plus className="w-3.5 h-3.5" />
             </button>
 
-            <span className="font-mono text-xs font-bold text-amber-300 min-w-[38px] text-right">
+            <span className="font-mono text-xs font-bold text-amber-300 min-w-[42px] text-right">
               {scrollSpeed}px/s
             </span>
           </div>

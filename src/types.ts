@@ -29,6 +29,7 @@ export interface ParsedChordPro {
   artist: string;
   subtitle?: string;
   key?: string;
+  era?: string; // e.g. "70s", "80s", "90s", "00s", "10s", etc.
   tempo?: number;
   timeSignature?: string;
   capo?: number;
@@ -45,6 +46,7 @@ export interface Song {
   artist: string;
   subtitle?: string;
   key?: string;
+  era?: string; // e.g. "70s", "80s", "90s", "00s", "10s"
   tempo?: number; // BPM
   timeSignature?: string;
   capo?: number;

@@ -6,6 +6,7 @@ export const SAMPLE_CHORDPRO_DATA: { filename: string; chordpro: string }[] = [
     filename: 'Eagles - Hotel California.cho',
     chordpro: `{title: Hotel California}
 {artist: Eagles}
+{era: 70s}
 {tempo: 75}
 {time: 4/4}
 {key: Bm}
@@ -70,6 +71,7 @@ And she said, [A]"We are all just prisoners here, [E7]of our own device"
     filename: 'Leonard Cohen - Hallelujah.cho',
     chordpro: `{title: Hallelujah}
 {artist: Leonard Cohen}
+{era: 80s}
 {tempo: 60}
 {time: 6/8}
 {key: C}
@@ -121,6 +123,7 @@ Halle[F]lujah, Halle[C]lu----[G]--[C]jah [Am] [C] [Am]
     filename: 'The Beatles - Let It Be.cho',
     chordpro: `{title: Let It Be}
 {artist: The Beatles}
+{era: 70s}
 {tempo: 72}
 {time: 4/4}
 {key: C}
@@ -165,6 +168,7 @@ I [C]wake up to the [G]sound of music, [Am]Mother Mary [F]comes to me
     filename: 'Bob Dylan - Knockin On Heavens Door.cho',
     chordpro: `{title: Knockin' on Heaven's Door}
 {artist: Bob Dylan}
+{era: 70s}
 {tempo: 68}
 {time: 4/4}
 {key: G}
@@ -204,6 +208,7 @@ I [C]wake up to the [G]sound of music, [Am]Mother Mary [F]comes to me
     filename: 'Ben E King - Stand By Me.cho',
     chordpro: `{title: Stand By Me}
 {artist: Ben E. King}
+{era: 60s}
 {tempo: 118}
 {time: 4/4}
 {key: A}
@@ -238,6 +243,7 @@ Oh, [D]stand now, [E7]stand by me, [A]stand by me
     filename: 'Vance Joy - Riptide.cho',
     chordpro: `{title: Riptide}
 {artist: Vance Joy}
+{era: 10s}
 {tempo: 102}
 {time: 4/4}
 {key: Am}
@@ -279,6 +285,7 @@ I got a lump in my [Am]throat 'cause [G]you're gonna sing the words [C]wrong
     filename: 'Oasis - Wonderwall.cho',
     chordpro: `{title: Wonderwall}
 {artist: Oasis}
+{era: 90s}
 {tempo: 87}
 {time: 4/4}
 {key: Em}
