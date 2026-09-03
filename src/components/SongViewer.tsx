@@ -21,7 +21,9 @@ import {
   Sliders, 
   Info,
   Guitar,
-  FileText
+  FileText,
+  Trash2,
+  Edit
 } from 'lucide-react';
 import { ChordProLine, ChordSegment, ParsedChordPro, Song, ViewerSettings, VisualTheme } from '../types';
 import { generateSummaryLines, getGuitarChord, serializeChordPro, transposeChord, transposeNote } from '../utils/chordpro';
@@ -34,6 +36,7 @@ interface SongViewerProps {
   settings: ViewerSettings;
   onUpdateSettings: (newSettings: Partial<ViewerSettings>) => void;
   onEditSong: (song: Song) => void;
+  onDeleteSong?: (songId: string) => void;
   initialSummaryMode?: boolean;
 }
 
@@ -43,6 +46,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   settings,
   onUpdateSettings,
   onEditSong,
+  onDeleteSong,
   initialSummaryMode = false,
 }) => {
   // Transpose state: semitone half-step offset (-11 to +11)
@@ -734,23 +738,46 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             </button>
           </div>
 
-          {/* Actions */}
-          <div className="pt-2 border-t border-slate-800 flex justify-between">
-            <button
-              type="button"
-              onClick={handleExportTransposed}
-              className="text-amber-400 hover:underline flex items-center gap-1 text-[11px]"
-            >
-              <Download className="w-3 h-3" />
-              Export Transposed .cho
-            </button>
-            <button
-              type="button"
-              onClick={() => onEditSong(song)}
-              className="text-sky-400 hover:underline text-[11px]"
-            >
-              Edit Song Text
-            </button>
+          {/* Actions & Danger Zone */}
+          <div className="pt-2 border-t border-slate-800 space-y-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleExportTransposed}
+                className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[11px] font-medium"
+              >
+                <Download className="w-3.5 h-3.5" />
+                Export Transposed .cho
+              </button>
+              <button
+                type="button"
+                onClick={() => onEditSong(song)}
+                className="text-sky-400 hover:text-sky-300 flex items-center gap-1 text-[11px] font-medium"
+              >
+                <Edit className="w-3.5 h-3.5" />
+                Edit Song Text
+              </button>
+            </div>
+
+            {onDeleteSong && (
+              <div className="pt-2 border-t border-slate-800/80">
+                <button
+                  id="settings-delete-song-btn"
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`Are you sure you want to delete "${song.title}" from your SongBook?\n\nThis will remove the song from your active repository.`)) {
+                      onDeleteSong(song.id);
+                      onBack();
+                    }
+                  }}
+                  className="w-full py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors text-xs"
+                  title="Delete this song from SongBook"
+                >
+                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                  Delete Song from SongBook
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

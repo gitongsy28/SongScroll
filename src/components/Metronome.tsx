@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { Play, Pause, Volume2, VolumeX, Plus, Minus, Activity, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Pause, Volume2, Volume1, VolumeX, Plus, Minus, Activity, ChevronDown, ChevronUp } from 'lucide-react';
 import { playMetronomeTick } from '../utils/metronomeAudio';
 
 interface MetronomeProps {
@@ -18,6 +18,10 @@ export const Metronome: React.FC<MetronomeProps> = ({
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [currentBeat, setCurrentBeat] = useState<number>(0);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(false);
+  const [volume, setVolume] = useState<number>(() => {
+    const saved = localStorage.getItem('songscroll_metronome_vol');
+    return saved ? parseFloat(saved) : 0.9;
+  });
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
   const [tapTimes, setTapTimes] = useState<number[]>([]);
 
@@ -30,11 +34,20 @@ export const Metronome: React.FC<MetronomeProps> = ({
   const soundEnabledRef = useRef(soundEnabled);
   soundEnabledRef.current = soundEnabled;
 
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
+
   const beatsRef = useRef(beatsPerMeasure);
   beatsRef.current = beatsPerMeasure;
 
   // Animation pendulum tick state
   const [pendulumSide, setPendulumSide] = useState<'left' | 'right'>('left');
+
+  const handleVolumeChange = (newVol: number) => {
+    const clamped = Math.max(0.05, Math.min(1.0, newVol));
+    setVolume(clamped);
+    localStorage.setItem('songscroll_metronome_vol', clamped.toString());
+  };
 
   useEffect(() => {
     if (!isPlaying || tempo <= 0) return;
@@ -48,7 +61,7 @@ export const Metronome: React.FC<MetronomeProps> = ({
 
       if (soundEnabledRef.current) {
         const isAccent = nextBeat === 0;
-        playMetronomeTick(isAccent, 0.4);
+        playMetronomeTick(isAccent, volumeRef.current);
       }
     }, intervalMs);
 
@@ -170,15 +183,26 @@ export const Metronome: React.FC<MetronomeProps> = ({
         <button
           id="metronome-sound-toggle"
           type="button"
-          onClick={() => setSoundEnabled(!soundEnabled)}
-          title={soundEnabled ? 'Mute audio click' : 'Enable audible click sound'}
+          onClick={() => {
+            const next = !soundEnabled;
+            setSoundEnabled(next);
+            if (next) {
+              // Play immediate preview tick
+              playMetronomeTick(true, volumeRef.current);
+            }
+          }}
+          title={soundEnabled ? 'Mute audible click' : 'Enable audible high-pitch click'}
           className={`p-1 rounded-lg transition-colors ${
             soundEnabled
               ? 'text-sky-400 hover:bg-slate-800'
               : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
           }`}
         >
-          {soundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+          {soundEnabled ? (
+            volume > 0.5 ? <Volume2 className="w-3.5 h-3.5" /> : <Volume1 className="w-3.5 h-3.5" />
+          ) : (
+            <VolumeX className="w-3.5 h-3.5" />
+          )}
         </button>
 
         {/* Expand / Controls toggle */}
@@ -197,8 +221,9 @@ export const Metronome: React.FC<MetronomeProps> = ({
       {isExpanded && (
         <div
           id="metronome-settings-panel"
-          className="mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 w-56 flex flex-col gap-2.5 backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-150 text-xs"
+          className="mt-2 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-3 w-64 flex flex-col gap-3 backdrop-blur-md animate-in fade-in slide-in-from-top-2 duration-150 text-xs"
         >
+          {/* Tempo section */}
           <div className="flex items-center justify-between text-slate-300 font-medium">
             <span>Tempo Adjustment</span>
             <span className="font-mono text-amber-300 font-bold text-sm">{tempo} BPM</span>
@@ -242,7 +267,7 @@ export const Metronome: React.FC<MetronomeProps> = ({
             </button>
           </div>
 
-          {/* Slider */}
+          {/* Tempo Slider */}
           <input
             id="metronome-slider"
             type="range"
@@ -252,6 +277,47 @@ export const Metronome: React.FC<MetronomeProps> = ({
             onChange={(e) => onTempoChange && onTempoChange(parseInt(e.target.value, 10))}
             className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-400"
           />
+
+          {/* Volume Control Section */}
+          <div className="pt-2 border-t border-slate-800 space-y-1.5">
+            <div className="flex items-center justify-between text-slate-300">
+              <span className="flex items-center gap-1.5 font-medium">
+                {volume > 0.5 ? (
+                  <Volume2 className="w-3.5 h-3.5 text-sky-400" />
+                ) : (
+                  <Volume1 className="w-3.5 h-3.5 text-sky-400" />
+                )}
+                Click Volume:
+              </span>
+              <span className="font-mono text-sky-300 font-bold">
+                {Math.round(volume * 100)}%
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                id="metronome-volume-slider"
+                type="range"
+                min="0.05"
+                max="1.0"
+                step="0.05"
+                value={volume}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  handleVolumeChange(val);
+                }}
+                className="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400"
+              />
+              <button
+                type="button"
+                onClick={() => playMetronomeTick(true, volume)}
+                className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-sky-300 text-[10px] font-bold rounded border border-slate-700 shrink-0"
+                title="Preview metronome sound click"
+              >
+                Test
+              </button>
+            </div>
+          </div>
 
           {/* Tap Tempo Button */}
           <button
@@ -268,3 +334,4 @@ export const Metronome: React.FC<MetronomeProps> = ({
     </div>
   );
 };
+

@@ -119,6 +119,7 @@ export default function App() {
           settings={viewerSettings}
           onUpdateSettings={handleUpdateSettings}
           onEditSong={handleEditSong}
+          onDeleteSong={handleDeleteSong}
           initialSummaryMode={startInSummaryMode}
         />
       ) : (
