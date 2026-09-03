@@ -5,9 +5,12 @@ import {
   loadAllSongs, 
   loadRepositoryConfig, 
   loadViewerSettings, 
+  saveMultipleSongs,
+  saveRepositoryConfig,
   saveSong, 
   saveViewerSettings 
 } from './utils/storage';
+import { syncSongsFromGitHubUrl } from './utils/githubSync';
 import { SongList } from './components/SongList';
 import { SongViewer } from './components/SongViewer';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
@@ -28,11 +31,40 @@ export default function App() {
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState<boolean>(false);
   const [songToEdit, setSongToEdit] = useState<Song | null>(null);
 
-  // Load songs on startup
+  // Load songs on startup & check for shared ?repo= URL parameter
   useEffect(() => {
     async function init() {
       setIsLoading(true);
       try {
+        // Check for ?repo= or ?source= in query params
+        const urlParams = new URLSearchParams(window.location.search);
+        const sharedRepoUrl = urlParams.get('repo') || urlParams.get('source');
+
+        if (sharedRepoUrl) {
+          try {
+            const { songs: syncedSongs } = await syncSongsFromGitHubUrl(sharedRepoUrl);
+            if (syncedSongs.length > 0) {
+              await saveMultipleSongs(syncedSongs);
+              setSongs(syncedSongs);
+              const updatedConfig: RepositoryConfig = {
+                ...repoConfig,
+                sourceType: 'github-url',
+                githubUrl: sharedRepoUrl,
+                directoryPath: sharedRepoUrl,
+                directoryName: 'Shared GitHub SongBook',
+                lastSyncedAt: Date.now(),
+                totalFilesFound: syncedSongs.length,
+              };
+              saveRepositoryConfig(updatedConfig);
+              setRepoConfig(updatedConfig);
+              setIsLoading(false);
+              return;
+            }
+          } catch (syncErr) {
+            console.warn('Auto-sync from URL failed:', syncErr);
+          }
+        }
+
         const loaded = await loadAllSongs();
         setSongs(loaded);
       } catch (err) {

@@ -11,7 +11,9 @@ import {
   Smartphone, 
   ChevronRight,
   Filter,
-  X
+  X,
+  Github,
+  Globe
 } from 'lucide-react';
 import { RepositoryConfig, Song } from '../types';
 
@@ -148,14 +150,18 @@ export const SongList: React.FC<SongListProps> = ({
                 id="header-repo-dir-btn"
                 type="button"
                 onClick={onOpenDirectoryConfig}
-                className="group flex items-center gap-1 text-[11px] text-slate-400 hover:text-amber-300 transition-colors"
-                title="Click to customize local repository directory"
+                className="group flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-amber-300 transition-colors"
+                title="Click to configure local drive (D:/) or shared GitHub repository"
               >
-                <HardDrive className="w-2.5 h-2.5 text-amber-400/80 group-hover:text-amber-300" />
-                <span className="font-mono truncate max-w-[180px] sm:max-w-[300px]">
-                  {repoConfig.directoryPath}
+                {repoConfig.sourceType === 'github-url' || (repoConfig.directoryPath && repoConfig.directoryPath.includes('github.com')) ? (
+                  <Github className="w-3 h-3 text-sky-400 shrink-0" />
+                ) : (
+                  <HardDrive className="w-3 h-3 text-amber-400/80 group-hover:text-amber-300 shrink-0" />
+                )}
+                <span className="font-mono truncate max-w-[180px] sm:max-w-[320px]">
+                  {repoConfig.directoryPath || 'D:/Songbook/'}
                 </span>
-                <span className="text-[10px] text-slate-500 group-hover:text-amber-400">
+                <span className="text-[10px] text-slate-500 group-hover:text-amber-400 font-sans">
                   (Change)
                 </span>
               </button>
@@ -180,9 +186,14 @@ export const SongList: React.FC<SongListProps> = ({
               type="button"
               onClick={onOpenDirectoryConfig}
               className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all"
+              title="Configure local drive storage or GitHub sync"
             >
-              <Folder className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Repo Folder</span>
+              {repoConfig.sourceType === 'github-url' || (repoConfig.directoryPath && repoConfig.directoryPath.includes('github.com')) ? (
+                <Github className="w-3.5 h-3.5 text-sky-400" />
+              ) : (
+                <Folder className="w-3.5 h-3.5 text-amber-400" />
+              )}
+              <span className="hidden sm:inline">Repo Source</span>
             </button>
 
             <button

@@ -86,9 +86,13 @@ export interface MetronomeState {
   volume: number; // 0 to 1
 }
 
+export type RepositorySourceType = 'local-drive' | 'github-url' | 'bundled';
+
 export interface RepositoryConfig {
-  directoryPath: string;
+  sourceType?: RepositorySourceType;
+  directoryPath: string; // Local path e.g. "D:/Songbook/" or "/Music/ChordPro/" or GitHub URL "https://github.com/gitongsy28/SongScroll/tree/main/public/SongBook/"
   directoryName: string;
+  githubUrl?: string;
   isFileSystemApiSupported: boolean;
   hasDirectoryHandle: boolean;
   lastSyncedAt?: number;
