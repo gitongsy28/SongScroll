@@ -16,14 +16,15 @@ import {
   X,
   ListFilter,
   LayoutGrid,
-  List
+  List,
+  FileText
 } from 'lucide-react';
 import { RepositoryConfig, Song } from '../types';
 import { downloadSongFile } from '../utils/storage';
 
 interface SongListProps {
   songs: Song[];
-  onSelectSong: (song: Song) => void;
+  onSelectSong: (song: Song, summaryMode?: boolean) => void;
   onOpenDirectoryConfig: () => void;
   onOpenNewSongModal: () => void;
   onEditSong: (song: Song) => void;
@@ -400,7 +401,16 @@ export const SongList: React.FC<SongListProps> = ({
                     </span>
                   )}
 
-                  <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-0.5 sm:gap-1" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectSong(song, true)}
+                      className="px-2 py-1 text-slate-300 hover:text-amber-300 bg-slate-950/80 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/40 rounded-lg transition-all flex items-center gap-1 text-xs font-semibold"
+                      title="Practice in Summary Mode"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-amber-400" />
+                      <span className="hidden sm:inline">Summary</span>
+                    </button>
                     <button
                       type="button"
                       onClick={() => downloadSongFile(song)}

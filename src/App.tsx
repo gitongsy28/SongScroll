@@ -16,6 +16,7 @@ import { AndroidInstallModal } from './components/AndroidInstallModal';
 
 export default function App() {
   const [songs, setSongs] = useState<Song[]>([]);
+  const [startInSummaryMode, setStartInSummaryMode] = useState<boolean>(false);
   const [selectedSong, setSelectedSong] = useState<Song | null>(null);
   const [repoConfig, setRepoConfig] = useState<RepositoryConfig>(loadRepositoryConfig());
   const [viewerSettings, setViewerSettings] = useState<ViewerSettings>(loadViewerSettings());
@@ -53,7 +54,8 @@ export default function App() {
   };
 
   // Song selection
-  const handleSelectSong = (song: Song) => {
+  const handleSelectSong = (song: Song, summaryMode = false) => {
+    setStartInSummaryMode(summaryMode);
     setSelectedSong(song);
   };
 
@@ -117,6 +119,7 @@ export default function App() {
           settings={viewerSettings}
           onUpdateSettings={handleUpdateSettings}
           onEditSong={handleEditSong}
+          initialSummaryMode={startInSummaryMode}
         />
       ) : (
         <SongList

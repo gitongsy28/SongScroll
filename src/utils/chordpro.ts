@@ -461,3 +461,198 @@ export function getGuitarChord(chordName: string): GuitarChordFingering | undefi
   const clean = chordName.split('/')[0].trim();
   return GUITAR_CHORDS_DB[clean];
 }
+
+/**
+ * Truncate a single lyrics line to its first 3 words for Summary Mode
+ * Retains chords that fall within those 3 words or the first chord as reminder
+ */
+export function truncateLyricLineTo3Words(line: ChordProLine): ChordProLine {
+  if (line.type !== 'lyrics' || !line.segments || line.segments.length === 0) {
+    return line;
+  }
+
+  const totalText = line.segments.map((s) => s.lyrics || '').join('');
+  const trimmedTotal = totalText.trim();
+  if (!trimmedTotal) {
+    // Chord-only line
+    return line;
+  }
+
+  let wordsCounted = 0;
+  const newSegments: ChordSegment[] = [];
+
+  for (let i = 0; i < line.segments.length; i++) {
+    const seg = line.segments[i];
+    const segLyrics = seg.lyrics || '';
+
+    if (wordsCounted >= 3) {
+      break;
+    }
+
+    const tokens = segLyrics.split(/(\s+)/);
+    let keptSegLyrics = '';
+
+    for (let t = 0; t < tokens.length; t++) {
+      const token = tokens[t];
+      if (token.trim().length > 0) {
+        if (wordsCounted < 3) {
+          wordsCounted++;
+          keptSegLyrics += token;
+        } else {
+          break;
+        }
+      } else {
+        if (wordsCounted < 3) {
+          keptSegLyrics += token;
+        }
+      }
+    }
+
+    newSegments.push({
+      chord: seg.chord,
+      lyrics: keptSegLyrics,
+      isChordOnly: seg.isChordOnly,
+    });
+  }
+
+  // If original had more than 3 words, append ellipsis
+  const allWords = trimmedTotal.split(/\s+/);
+  if (allWords.length > 3 && newSegments.length > 0) {
+    const lastSeg = newSegments[newSegments.length - 1];
+    const trimmedEnd = (lastSeg.lyrics || '').trimEnd();
+    lastSeg.lyrics = trimmedEnd ? `${trimmedEnd}...` : '...';
+  }
+
+  // If new segments have no chord at all, but original line had a chord, attach first chord
+  const hasAnyChordInNew = newSegments.some((s) => !!s.chord);
+  if (!hasAnyChordInNew) {
+    const firstChordInOrig = line.segments.find((s) => !!s.chord)?.chord;
+    if (firstChordInOrig && newSegments.length > 0) {
+      newSegments[0].chord = firstChordInOrig;
+    }
+  }
+
+  return {
+    ...line,
+    segments: newSegments,
+  };
+}
+
+export interface SectionBlock {
+  header?: ChordProLine;
+  footer?: ChordProLine;
+  lines: ChordProLine[];
+}
+
+/**
+ * Partition parsed ChordPro lines into logical song sections
+ */
+export function partitionIntoSections(lines: ChordProLine[]): SectionBlock[] {
+  const sections: SectionBlock[] = [];
+  let currentSection: SectionBlock = { lines: [] };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (
+      line.type === 'comment' ||
+      line.type === 'chorus_start' ||
+      line.type === 'bridge_start' ||
+      line.type === 'tab_start'
+    ) {
+      if (currentSection.header || currentSection.lines.length > 0) {
+        sections.push(currentSection);
+      }
+      currentSection = {
+        header: line,
+        lines: [],
+      };
+    } else if (
+      line.type === 'chorus_end' ||
+      line.type === 'bridge_end' ||
+      line.type === 'tab_end'
+    ) {
+      currentSection.footer = line;
+      sections.push(currentSection);
+      currentSection = { lines: [] };
+    } else if (line.type === 'empty') {
+      // Empty line closes the current unblocked section
+      if (!currentSection.header || currentSection.header.type === 'comment') {
+        if (currentSection.lines.length > 0) {
+          sections.push(currentSection);
+          currentSection = { lines: [] };
+        }
+      }
+    } else if (line.type === 'directive') {
+      // Skip directive lines in summary structure
+    } else {
+      currentSection.lines.push(line);
+    }
+  }
+
+  if (currentSection.header || currentSection.lines.length > 0) {
+    sections.push(currentSection);
+  }
+
+  return sections;
+}
+
+/**
+ * Generate Summary Mode lines from full ChordPro parsed lines
+ * - Retains section headers
+ * - For lyrics: only first 3 words of first line of each section with '...'
+ * - For chords: full progressions shown for intro/outro/instrumental/solo/bridge with no lyrics;
+ *   for verses/chorus with lyrics, only chords of the first reminder line are shown.
+ */
+export function generateSummaryLines(lines: ChordProLine[]): ChordProLine[] {
+  const sections = partitionIntoSections(lines);
+  const result: ChordProLine[] = [];
+
+  sections.forEach((section, sIdx) => {
+    // 1. Output Section Header
+    if (section.header) {
+      result.push(section.header);
+    }
+
+    // 2. Check if section has lyrics
+    const hasLyrics = section.lines.some((l) => {
+      if (l.type !== 'lyrics' || !l.segments) return false;
+      const text = l.segments.map((s) => s.lyrics || '').join('').trim();
+      return text.length > 0;
+    });
+
+    if (!hasLyrics) {
+      // No lyrics in this section (e.g. Intro Bass Riff, Solo, Tab, Instrumental) -> retain all chords/tabs
+      result.push(...section.lines);
+    } else {
+      // Section has lyrics: keep chords before first lyric, then first lyric line truncated to 3 words
+      const firstLyricIndex = section.lines.findIndex((l) => {
+        if (l.type !== 'lyrics' || !l.segments) return false;
+        const text = l.segments.map((s) => s.lyrics || '').join('').trim();
+        return text.length > 0;
+      });
+
+      if (firstLyricIndex !== -1) {
+        // Retain any chord-only lines that preceded the first lyric line
+        for (let i = 0; i < firstLyricIndex; i++) {
+          result.push(section.lines[i]);
+        }
+        // Truncate the first lyric line to 3 words + reminder chords
+        result.push(truncateLyricLineTo3Words(section.lines[firstLyricIndex]));
+      }
+    }
+
+    // 3. Output Section Footer
+    if (section.footer) {
+      result.push(section.footer);
+    }
+
+    // 4. Space between sections
+    if (sIdx < sections.length - 1) {
+      result.push({ type: 'empty', raw: '' });
+    }
+  });
+
+  return result;
+}
+

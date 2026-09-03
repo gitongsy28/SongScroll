@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   ArrowLeft, 
   Play, 
@@ -20,10 +20,11 @@ import {
   Check, 
   Sliders, 
   Info,
-  Guitar
+  Guitar,
+  FileText
 } from 'lucide-react';
 import { ChordProLine, ChordSegment, ParsedChordPro, Song, ViewerSettings, VisualTheme } from '../types';
-import { getGuitarChord, serializeChordPro, transposeChord, transposeNote } from '../utils/chordpro';
+import { generateSummaryLines, getGuitarChord, serializeChordPro, transposeChord, transposeNote } from '../utils/chordpro';
 import { downloadSongFile } from '../utils/storage';
 import { Metronome } from './Metronome';
 
@@ -33,6 +34,7 @@ interface SongViewerProps {
   settings: ViewerSettings;
   onUpdateSettings: (newSettings: Partial<ViewerSettings>) => void;
   onEditSong: (song: Song) => void;
+  initialSummaryMode?: boolean;
 }
 
 export const SongViewer: React.FC<SongViewerProps> = ({
@@ -41,11 +43,15 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   settings,
   onUpdateSettings,
   onEditSong,
+  initialSummaryMode = false,
 }) => {
   // Transpose state: semitone half-step offset (-11 to +11)
   const [transposeOffset, setTransposeOffset] = useState<number>(0);
   const [preferSharps, setPreferSharps] = useState<boolean>(settings.preferSharps ?? true);
   
+  // Summary Mode state: quick practice reference and memorization
+  const [isSummaryMode, setIsSummaryMode] = useState<boolean>(initialSummaryMode);
+
   // Auto-scroll state
   const [isScrolling, setIsScrolling] = useState<boolean>(false);
   const [scrollSpeed, setScrollSpeed] = useState<number>(settings.scrollSpeed || 30); // px / sec
@@ -82,6 +88,14 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     metadata: {},
     raw: song.rawChordPro,
   };
+
+  // Compute displayed lines based on Summary Mode toggle
+  const displayLines = useMemo(() => {
+    if (!isSummaryMode) {
+      return parsed.lines;
+    }
+    return generateSummaryLines(parsed.lines);
+  }, [parsed.lines, isSummaryMode]);
 
   // Screen Wake Lock API to prevent screen from dimming/sleeping on music stand
   useEffect(() => {
@@ -186,6 +200,11 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       } else if (e.key === 'Home') {
         e.preventDefault();
         handleRestart();
+      } else if (e.key === 's' || e.key === 'S') {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          setIsSummaryMode((prev) => !prev);
+        }
       } else if (e.key === '+' || e.key === '=') {
         setTransposeOffset((prev) => (prev + 1) % 12);
       } else if (e.key === '-' || e.key === '_') {
@@ -326,7 +345,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       {/* Top Header Bar */}
       <header
         id="viewer-top-bar"
-        className={`sticky top-0 z-40 px-3 sm:px-6 py-2 sm:py-2.5 flex items-center justify-between border-b backdrop-blur-md ${themeStyles.headerBg} shadow-sm`}
+        className={`sticky top-0 z-40 px-2.5 sm:px-6 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 border-b backdrop-blur-md ${themeStyles.headerBg} shadow-sm`}
       >
         {/* Left: Back & Song Info */}
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
@@ -358,8 +377,37 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           </div>
         </div>
 
-        {/* Center/Right: Transpose Badges & Metronome */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        {/* Center/Right: Summary Button, Transpose Badges & Metronome */}
+        <div className="flex items-center flex-wrap gap-1.5 sm:gap-2.5 shrink-0">
+          {/* Summary Mode Toggle Button */}
+          <button
+            id="toggle-summary-mode-btn"
+            type="button"
+            onClick={() => setIsSummaryMode(!isSummaryMode)}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all active:scale-95 shadow-md border ${
+              isSummaryMode
+                ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 border-amber-300 font-extrabold ring-2 ring-amber-400/40 shadow-amber-500/30'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-100 border-slate-600 hover:border-amber-400/60 hover:text-amber-300'
+            }`}
+            title={
+              isSummaryMode
+                ? 'Exit Summary Mode (View Full Song - shortcut: S)'
+                : 'Toggle Summary Mode (Section headers + first 3 words & reminder chords - shortcut: S)'
+            }
+          >
+            <FileText className={`w-4 h-4 ${isSummaryMode ? 'text-slate-950 fill-slate-950/20' : 'text-amber-400'}`} />
+            <span className="tracking-wide">
+              {isSummaryMode ? 'Summary: ON' : 'Summary'}
+            </span>
+            {isSummaryMode ? (
+              <span className="w-2 h-2 rounded-full bg-slate-950 animate-pulse" />
+            ) : (
+              <span className="text-[10px] px-1 py-0.2 rounded bg-slate-950/60 text-slate-400 border border-slate-700 font-mono hidden md:inline">
+                S
+              </span>
+            )}
+          </button>
+
           {/* Transpose Controls in Header */}
           <div
             id="viewer-transpose-controls"
@@ -413,8 +461,12 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             id="toggle-settings-drawer-btn"
             type="button"
             onClick={() => setShowSettingsDrawer(!showSettingsDrawer)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-amber-400 border border-slate-700 transition-colors"
-            title="Display & Transpose Settings"
+            className={`p-2 rounded-xl border transition-colors flex items-center gap-1 text-xs font-semibold ${
+              showSettingsDrawer
+                ? 'bg-amber-500 text-slate-950 border-amber-400'
+                : 'bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-amber-400 border-slate-700'
+            }`}
+            title="Display, Stage & Summary Settings"
           >
             <Sliders className="w-4 h-4" />
           </button>
@@ -478,6 +530,25 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             </div>
           </div>
 
+          {/* Summary Mode Banner */}
+          {isSummaryMode && (
+            <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5 text-xs text-amber-300 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Summary Mode:</strong> Section headers, intro/outro/instrumental chords, and first 3 words reminder.
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSummaryMode(false)}
+                className="text-[11px] underline text-amber-400 hover:text-amber-200 shrink-0 font-semibold ml-2"
+              >
+                Restore Full Song
+              </button>
+            </div>
+          )}
+
           {/* Render Parsed ChordPro Content */}
           <div
             id="chordpro-content-body"
@@ -486,7 +557,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             }`}
             style={{ fontSize: `${fontSize}px` }}
           >
-            {parsed.lines.map((line, idx) => (
+            {displayLines.map((line, idx) => (
               <RenderLine
                 key={idx}
                 line={line}
@@ -510,18 +581,54 @@ export const SongViewer: React.FC<SongViewerProps> = ({
 
       {/* Floating Settings Drawer */}
       {showSettingsDrawer && (
-        <div className="absolute top-14 right-4 z-50 w-80 bg-slate-900/95 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl p-4 space-y-4 text-xs animate-in fade-in slide-in-from-top-2">
+        <div className="absolute top-14 right-4 z-50 w-80 max-h-[calc(100vh-5rem)] overflow-y-auto bg-slate-900/98 backdrop-blur-md border border-slate-700 rounded-2xl shadow-2xl p-4 space-y-4 text-xs animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <span className="font-bold text-slate-100 flex items-center gap-1.5">
               <Sliders className="w-4 h-4 text-amber-400" />
-              Stage & Chord Settings
+              Stage & Display Settings
             </span>
             <button
               onClick={() => setShowSettingsDrawer(false)}
-              className="text-slate-400 hover:text-slate-200 text-xs"
+              className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-xs"
             >
               ✕
             </button>
+          </div>
+
+          {/* Prominent Summary Mode Toggle Card (Top of Settings) */}
+          <div className={`p-3 rounded-xl border transition-all ${
+            isSummaryMode 
+              ? 'bg-amber-500/15 border-amber-400/50 shadow-sm' 
+              : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+          }`}>
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-slate-100 font-bold flex items-center gap-1.5 text-xs">
+                  <FileText className={`w-4 h-4 ${isSummaryMode ? 'text-amber-400' : 'text-slate-400'}`} />
+                  <span>Summary Mode</span>
+                  {isSummaryMode && (
+                    <span className="px-1.5 py-0.2 rounded bg-amber-400 text-slate-950 text-[10px] font-extrabold">
+                      ACTIVE
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                  Retains section headers, intro/outro chords & 3-word lyric reminder
+                </div>
+              </div>
+              <button
+                id="drawer-summary-toggle-btn"
+                type="button"
+                onClick={() => setIsSummaryMode(!isSummaryMode)}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all shrink-0 active:scale-95 ${
+                  isSummaryMode
+                    ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 font-extrabold shadow-md'
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
+                }`}
+              >
+                {isSummaryMode ? 'ON' : 'OFF'}
+              </button>
+            </div>
           </div>
 
           {/* Enharmonic Spelling Toggle */}
@@ -654,8 +761,24 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         className={`sticky bottom-0 z-40 px-3 sm:px-6 py-2.5 sm:py-3 border-t backdrop-blur-md ${themeStyles.barBg} shadow-2xl`}
       >
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3">
-          {/* Reposition & Restart Buttons */}
+          {/* Reposition, Summary & Restart Buttons */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* Quick Summary Toggle in Bottom Bar */}
+            <button
+              id="bottom-summary-toggle-btn"
+              type="button"
+              onClick={() => setIsSummaryMode(!isSummaryMode)}
+              className={`px-2.5 sm:px-3 py-2 border rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95 ${
+                isSummaryMode
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 font-extrabold ring-1 ring-amber-400/50'
+                  : 'bg-slate-800/90 hover:bg-slate-700 text-slate-200 border-slate-700 hover:text-amber-300'
+              }`}
+              title="Toggle Summary Mode (Shortcut: S)"
+            >
+              <FileText className={`w-3.5 h-3.5 ${isSummaryMode ? 'text-slate-950 fill-slate-950/20' : 'text-amber-400'}`} />
+              <span className="hidden xs:inline">{isSummaryMode ? 'Summary: ON' : 'Summary'}</span>
+            </button>
+
             {/* Restart from beginning */}
             <button
               id="scroll-restart-btn"
