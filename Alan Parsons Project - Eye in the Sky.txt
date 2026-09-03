@@ -1,0 +1,62 @@
+{title: 80s - The Alan Parsons Project - Eye in the Sky}
+{artist: The Alan Parsons Project}
+{key: Bm}
+{capo: 0}
+{tempo: 112}
+{time: 4/4}
+{duration: 4:36}
+{comment: Key: B Minor (relative D Major) | Capo: None | Tempo: 112 BPM | Time: 4/4 | Duration: 4:36 | Year: 1982 (from album Eye in the Sky)}
+
+{c: Intro}
+[Bm] [G] [Bm] [G]
+
+{c: Verse 1}
+[D]Don't think sorry's easily [Bm]said
+[D]Don't try turning tables in[Bm]stead
+You've taken [G6]lots of chances be[Gm6]fore
+But I ain't gonna give any [Bm7]more [E7]
+Don't ask me
+
+[D]That's how it [Bm]goes
+'Cause part of me [G]knows that you've lied
+
+{c: Chorus}
+[D]I am the eye in the sky
+Looking at [G]you
+I can read your [D]mind
+I am the maker of [G]rules
+Dealing with [D]fools
+I can cheat you [G]blind
+And I don't need to see any [D]more
+To know that [G]I can read your mind, I can [D]read your mind
+
+{c: Verse 2}
+[D]Don't leave false illusions be[Bm]hind
+[D]Don't cry 'cause I ain't changing my [Bm]mind
+So find another [G6]fool like be[Gm6]fore
+'Cause I ain't gonna live any[Bm7]more believing [E7]
+Some of the lies you've been [D]told
+
+{c: Chorus}
+[D]I am the eye in the sky
+Looking at [G]you
+I can read your [D]mind
+I am the maker of [G]rules
+Dealing with [D]fools
+I can cheat you [G]blind
+And I don't need to see any [D]more
+To know that [G]I can read your mind, I can [D]read your mind
+
+{c: Instrumental / Solo}
+[Bm] [G] [Bm] [G]
+[D] [Bm] [G] [D]
+
+{c: Final Chorus}
+[D]I am the eye in the sky
+Looking at [G]you
+I can read your [D]mind
+I am the maker of [G]rules
+Dealing with [D]fools
+I can cheat you [G]blind
+And I don't need to see any [D]more
+To know that [G]I can read your mind, I can [D]read your mind
