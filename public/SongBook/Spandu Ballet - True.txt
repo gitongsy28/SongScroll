@@ -1,0 +1,93 @@
+{title: 80s - Spandau Ballet - True}
+{artist: Spandau Ballet}
+{key: G}
+{capo: 0}
+{tempo: 98}
+{time: 4/4}
+{duration: 5:40}
+{comment: Song key: G major}
+{comment: Capo: No capo}
+{comment: Tempo: 98 BPM}
+{comment: Time: 4/4}
+{comment: Duration: 5:40 (single edit; album version ~6:00)}
+{comment: Year of release: 1983}
+
+{comment: Intro}
+[G] [Em7] [C] [Bm]
+[G] [Em7] [C] [Bm]
+[Am] [F]
+
+{start_of_verse}
+[G]So true, funny how it [Bm]seems
+[C]Always in time, but never in line for [D#]dreams [G]
+[Bm]Head over heels when toe to [C]toe
+[Em7]This is the sound of my [C]soul
+[G]This is the sound
+{end_of_verse}
+
+{start_of_bridge}
+[C]I bought a ticket to the [G]world
+[C]But now I've come back a[G]gain
+[C]Why do I find it hard to write the [G]next line?
+[C]Oh I want the truth to be [F]said
+{end_of_bridge}
+
+{start_of_chorus}
+[G]Huh huh huh, hu-uh [Em7]huh
+[C]I know this much is [Bm]true
+[G]Huh huh huh, hu-uh [Em7]huh
+[C]I know this much is [Bm]true [Am] [F]
+{end_of_chorus}
+
+{start_of_verse}
+[G]With a thrill in my head and a pill on my [Bm]tongue [C]
+[D#]Dissolve the nerves that have just be[G]gun
+[Bm]Listening to Marvin all night [C]long
+[Em7]This is the sound of my [C]soul
+[G]This is the sound
+{end_of_verse}
+
+{start_of_bridge}
+[C]Always slipping from my [G]hands
+[C]Sand's a time of its [G]own
+[C]Take your seaside arms and write the [G]next line
+[C]Oh I want the truth to be [F]known
+{end_of_bridge}
+
+{start_of_chorus}
+[G]Huh huh huh, hu-uh [Em7]huh
+[C]I know this much is [Bm]true
+[G]Huh huh huh, hu-uh [Em7]huh
+[C]I know this much is [Bm]true [Am] [F]
+{end_of_chorus}
+
+{comment: Saxophone Solo}
+[D#] [G#] [D#] [G#]
+[D#] [G#] [D#] [G#]
+[D#] [G#] [D#] [G#]
+[D#] [G#] [G]
+
+{start_of_bridge}
+[C]I bought a ticket to the [G]world
+[C]But now I've come back a[G]gain
+[C]Why do I find it hard to write the [G]next line?
+[C]Oh I want the truth to be [F]said
+{end_of_bridge}
+
+{start_of_chorus}
+[G]Huh huh huh, hu-uh [Em7]huh
+[C]I know this much is [Bm]true
+[G]Huh huh huh, hu-uh [Em7]huh
+[C]I know this much is [Bm]true
+{end_of_chorus}
+
+{comment: Bridge / Outro}
+[Em7]This much is [Am]true
+[Em7]This much is [Am]true [F]
+[G]This much is true
+[Em7]This much is true
+[C]This much is true
+[Bm] [G]
+[Em7]This much is true
+[C]I know this much is [Bm]true
+[G]This much is true

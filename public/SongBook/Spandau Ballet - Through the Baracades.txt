@@ -1,0 +1,68 @@
+{title: 80s - Spandau Ballet - Through the Barricades}
+{artist: Spandau Ballet}
+{key: G}
+{capo: 0}
+{tempo: 73}
+{time: 4/4}
+{duration: 5:58}
+{comment: Key: G Major | Capo: None | Tempo: 73 BPM (half-time feel; ~146 BPM double-time) | Time: 4/4 | Duration: 5:58 (album version) | Year: 1986}
+
+{c: Intro}
+[G] [Em] [Bm] [Bm7]
+[C] [Em] [F] [C] [Cm] [D]
+
+{c: Verse 1}
+[G]Mother doesn't know where love has [Em]gone
+[Bm7]She says it must be [C]youth that keeps us [Em]feeling [F]strong [C]
+[G]I see it in her face that's turned to [Em]ice
+[Bm7]And when she smiles she shows the [C]lines of [Em]sacri[F]fice [D]
+
+{c: Chorus}
+And now I [C]know what they're [D]sayin'
+As our [G]sun begins to [Em]fade
+And we made our [C]love on [Am]wasteland
+And [C]through the [D]barri[G]cades
+
+{c: Verse 2}
+[G]Father made my [Em]history
+[Bm7]He fought for what he [C]thought would set us [Em]somehow [F]free [C]
+[G]He taught me what to say in [Em]school
+[Bm7]I learned it off by heart but now [C]that's torn in [Em]two [F] [D]
+
+{c: Chorus}
+And now I [C]know what they're [D]sayin'
+In the [G]music of the [Em]parade
+And we made our [C]love on [Am]wasteland
+And [C]through the [D]barri[F]cades
+
+{c: Instrumental}
+[F] [C] [G]
+
+{c: Verse 3}
+[G]Born on different sides of [Em]life
+[Bm7]We fear the same and [C]feel all of this [Em]strife [F] [C]
+[G]So come to me when I'm a[Em]sleep (asleep)
+[Bm7]We'll cross the lines and [C]dance upon the [Em]streets [F] [D]
+
+{c: Chorus}
+And now I [C]know what they're [D]sayin'
+As the [G]drums begin to [Em]fade
+And we made our [C]love on [Am]wasteland
+And [C]through the [D]barri[G]cades
+
+{c: Bridge}
+[F]Oh, [C]turn around and I'll be [G]there
+Oh, there's a [F]scar right through my heart but I'll [C]bear it a[G]gain
+Oh, I [F]thought we were the human [C]race
+But we were just another border[G]line [Em]case
+And the [C]stars reach down and tell us
+There's always one e[D]scape
+
+{c: Verse 4}
+[G]Oh, I don't know where love has [D/F#]gone
+And in this troubled [Em]land desperation keeps us [C]strong
+[Em]Friday's child is full of [C]soul
+With nothing left to lose, there's everything to [D]go
+
+{c: Chorus}
+And now I [C]know what they're [D]sayin'
