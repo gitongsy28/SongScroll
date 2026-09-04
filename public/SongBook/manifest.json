@@ -2,10 +2,12 @@
   "name": "Default SongBook",
   "description": "Standard ChordPro songs bundled with SongScroll",
   "files": [
-    "Hotel CaliforniaS.cho",
+    "Alan Parsons Project - Eye in the Sky.txt",
+    "Bread - Make It WIth You.txt",
     "Hallelujah.cho",
-    "Wonderwall.cho",
+    "Hotel California.cho",
     "Knockin on Heavens Door.cho",
-    "Take Me Home Country Roads.cho"
+    "Take Me Home Country Roads.cho",
+    "Wonderwall.cho"
   ]
 }

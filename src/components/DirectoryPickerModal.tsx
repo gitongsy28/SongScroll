@@ -9,20 +9,22 @@ import {
   X, 
   AlertCircle, 
   Sparkles, 
-  Globe, 
   Share2, 
   Copy, 
-  ExternalLink,
-  Github
+  Github,
+  CheckCircle2,
+  ArrowRight
 } from 'lucide-react';
 import { RepositoryConfig, RepositorySourceType, Song } from '../types';
 import { 
   parseUploadedFiles, 
   resetToDefaultSongs, 
-  saveMultipleSongs, 
   saveRepositoryConfig, 
   setDirectoryHandle, 
-  syncSongsFromDirectoryHandle 
+  syncSongsFromDirectoryHandle,
+  replaceActiveSongs,
+  loadSourceSongs,
+  clearAllSongs
 } from '../utils/storage';
 import { parseGitHubUrl, syncBundledSongBook, syncSongsFromGitHubUrl } from '../utils/githubSync';
 
@@ -43,7 +45,13 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   onSongsUpdated,
   currentSongCount,
 }) => {
-  const [activeTab, setActiveTab] = useState<'local' | 'github' | 'bundled'>('local');
+  const getInitialTab = (): 'local' | 'github' | 'bundled' => {
+    if (config.sourceType === 'bundled') return 'bundled';
+    if (config.sourceType === 'github-url') return 'github';
+    return 'local';
+  };
+
+  const [activeTab, setActiveTab] = useState<'local' | 'github' | 'bundled'>(getInitialTab);
   const [customPath, setCustomPath] = useState(config.directoryPath || 'D:/Songbook/');
   const [githubUrl, setGithubUrl] = useState(
     config.githubUrl || 'https://github.com/gitongsy28/SongScroll/tree/main/public/SongBook/'
@@ -53,6 +61,124 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
   const [copiedLink, setCopiedLink] = useState(false);
 
   if (!isOpen) return null;
+
+  // Explicitly activate and switch repository source (clears out previous source songs)
+  const handleSwitchToSource = async (targetSource: RepositorySourceType) => {
+    setIsLoading(true);
+    setStatusMessage({ text: `Switching to ${targetSource === 'bundled' ? '/public/SongBook/' : targetSource === 'github-url' ? 'GitHub URL' : 'Local Drive'}...`, type: 'info' });
+
+    try {
+      if (targetSource === 'bundled') {
+        const bundledSongs = await syncBundledSongBook();
+        const saved = await replaceActiveSongs(bundledSongs, 'bundled');
+        onSongsUpdated(saved);
+
+        const updatedConfig: RepositoryConfig = {
+          ...config,
+          sourceType: 'bundled',
+          directoryPath: '/public/SongBook/',
+          directoryName: 'Bundled /public/SongBook/',
+          lastSyncedAt: Date.now(),
+          totalFilesFound: saved.length,
+        };
+        saveRepositoryConfig(updatedConfig);
+        onConfigChange(updatedConfig);
+        setStatusMessage({
+          text: `Switched to /public/SongBook/ (${saved.length} songs loaded without duplicates).`,
+          type: 'success',
+        });
+      } else if (targetSource === 'github-url') {
+        const trimmedUrl = githubUrl.trim();
+        const cached = loadSourceSongs('github-url');
+
+        if (cached && cached.length > 0) {
+          const saved = await replaceActiveSongs(cached, 'github-url');
+          onSongsUpdated(saved);
+          const updatedConfig: RepositoryConfig = {
+            ...config,
+            sourceType: 'github-url',
+            githubUrl: trimmedUrl,
+            directoryPath: trimmedUrl,
+            directoryName: 'GitHub SongBook',
+            totalFilesFound: saved.length,
+          };
+          saveRepositoryConfig(updatedConfig);
+          onConfigChange(updatedConfig);
+          setStatusMessage({
+            text: `Switched to GitHub Repository (${saved.length} cached songs loaded). Click "Sync Songs" to refresh.`,
+            type: 'success',
+          });
+        } else if (trimmedUrl) {
+          const { songs, message } = await syncSongsFromGitHubUrl(trimmedUrl);
+          const saved = await replaceActiveSongs(songs, 'github-url');
+          onSongsUpdated(saved);
+          const parsed = parseGitHubUrl(trimmedUrl);
+          const updatedConfig: RepositoryConfig = {
+            ...config,
+            sourceType: 'github-url',
+            githubUrl: trimmedUrl,
+            directoryPath: trimmedUrl,
+            directoryName: parsed ? `${parsed.owner}/${parsed.repo}/${parsed.path}` : 'GitHub SongBook',
+            lastSyncedAt: Date.now(),
+            totalFilesFound: saved.length,
+          };
+          saveRepositoryConfig(updatedConfig);
+          onConfigChange(updatedConfig);
+          setStatusMessage({ text: message, type: 'success' });
+        } else {
+          await clearAllSongs();
+          onSongsUpdated([]);
+          const updatedConfig: RepositoryConfig = {
+            ...config,
+            sourceType: 'github-url',
+            totalFilesFound: 0,
+          };
+          saveRepositoryConfig(updatedConfig);
+          onConfigChange(updatedConfig);
+          setStatusMessage({ text: 'Switched to GitHub source. Enter a URL and click Sync Songs.', type: 'info' });
+        }
+      } else if (targetSource === 'local-drive') {
+        const cached = loadSourceSongs('local-drive');
+        if (cached && cached.length > 0) {
+          const saved = await replaceActiveSongs(cached, 'local-drive');
+          onSongsUpdated(saved);
+          const updatedConfig: RepositoryConfig = {
+            ...config,
+            sourceType: 'local-drive',
+            directoryPath: customPath || 'D:/Songbook/',
+            directoryName: 'Local Drive Repository',
+            totalFilesFound: saved.length,
+          };
+          saveRepositoryConfig(updatedConfig);
+          onConfigChange(updatedConfig);
+          setStatusMessage({
+            text: `Switched to Local Drive (${saved.length} songs loaded).`,
+            type: 'success',
+          });
+        } else {
+          await clearAllSongs();
+          onSongsUpdated([]);
+          const updatedConfig: RepositoryConfig = {
+            ...config,
+            sourceType: 'local-drive',
+            directoryPath: customPath || 'D:/Songbook/',
+            directoryName: 'Local Drive Repository',
+            totalFilesFound: 0,
+          };
+          saveRepositoryConfig(updatedConfig);
+          onConfigChange(updatedConfig);
+          setStatusMessage({
+            text: 'Switched to Local Drive. Select a folder or upload ChordPro files to load your songs.',
+            type: 'info',
+          });
+        }
+      }
+    } catch (err: any) {
+      setStatusMessage({ text: `Failed to switch source: ${err.message}`, type: 'error' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Handle native File System Access directory picker (e.g. D:\Songbook)
   const handlePickNativeDirectory = async () => {
@@ -81,8 +207,9 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       const syncedSongs = await syncSongsFromDirectoryHandle(dirHandle, pathName);
 
       if (syncedSongs.length > 0) {
-        await saveMultipleSongs(syncedSongs);
-        onSongsUpdated(syncedSongs);
+        // Replace active songs completely (no appending or duplicates)
+        const saved = await replaceActiveSongs(syncedSongs, 'local-drive');
+        onSongsUpdated(saved);
 
         const updatedConfig: RepositoryConfig = {
           ...config,
@@ -91,19 +218,19 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           directoryName: dirHandle.name,
           hasDirectoryHandle: true,
           lastSyncedAt: Date.now(),
-          totalFilesFound: syncedSongs.length,
+          totalFilesFound: saved.length,
         };
 
         saveRepositoryConfig(updatedConfig);
         onConfigChange(updatedConfig);
 
         setStatusMessage({
-          text: `Successfully synced ${syncedSongs.length} ChordPro song(s) from local folder "${dirHandle.name}"!`,
+          text: `Successfully synced ${saved.length} ChordPro song(s) from local folder "${dirHandle.name}"!`,
           type: 'success'
         });
       } else {
         setStatusMessage({
-          text: `Connected to folder "${dirHandle.name}". No .cho or .txt ChordPro files found yet. You can add songs here.`,
+          text: `Connected to folder "${dirHandle.name}". No .cho or .txt ChordPro files found yet.`,
           type: 'info'
         });
       }
@@ -131,22 +258,23 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       const parsedSongs = await parseUploadedFiles(files, customPath);
 
       if (parsedSongs.length > 0) {
-        await saveMultipleSongs(parsedSongs);
-        onSongsUpdated(parsedSongs);
+        // Replace active songs completely (no appending or duplicates)
+        const saved = await replaceActiveSongs(parsedSongs, 'local-drive');
+        onSongsUpdated(saved);
 
         const updatedConfig: RepositoryConfig = {
           ...config,
           sourceType: 'local-drive',
           directoryPath: customPath,
           lastSyncedAt: Date.now(),
-          totalFilesFound: parsedSongs.length,
+          totalFilesFound: saved.length,
         };
 
         saveRepositoryConfig(updatedConfig);
         onConfigChange(updatedConfig);
 
         setStatusMessage({
-          text: `Successfully imported ${parsedSongs.length} song(s) into repository!`,
+          text: `Successfully loaded ${saved.length} song(s) into Local Drive repository!`,
           type: 'success'
         });
       } else {
@@ -196,8 +324,9 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
       const { songs, message } = await syncSongsFromGitHubUrl(trimmedUrl);
 
       if (songs.length > 0) {
-        await saveMultipleSongs(songs);
-        onSongsUpdated(songs);
+        // Replace active songs completely (no appending or duplicates)
+        const saved = await replaceActiveSongs(songs, 'github-url');
+        onSongsUpdated(saved);
 
         const parsed = parseGitHubUrl(trimmedUrl);
         const updatedConfig: RepositoryConfig = {
@@ -207,7 +336,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           directoryPath: trimmedUrl,
           directoryName: parsed ? `${parsed.owner}/${parsed.repo}/${parsed.path}` : 'GitHub SongBook',
           lastSyncedAt: Date.now(),
-          totalFilesFound: songs.length,
+          totalFilesFound: saved.length,
         };
 
         saveRepositoryConfig(updatedConfig);
@@ -236,23 +365,24 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
 
       const songs = await syncBundledSongBook();
       if (songs.length > 0) {
-        await saveMultipleSongs(songs);
-        onSongsUpdated(songs);
+        // Replace active songs completely (no appending or duplicates)
+        const saved = await replaceActiveSongs(songs, 'bundled');
+        onSongsUpdated(saved);
 
         const updatedConfig: RepositoryConfig = {
           ...config,
           sourceType: 'bundled',
           directoryPath: '/public/SongBook/',
-          directoryName: 'Bundled SongBook',
+          directoryName: 'Bundled /public/SongBook/',
           lastSyncedAt: Date.now(),
-          totalFilesFound: songs.length,
+          totalFilesFound: saved.length,
         };
 
         saveRepositoryConfig(updatedConfig);
         onConfigChange(updatedConfig);
 
         setStatusMessage({
-          text: `Loaded ${songs.length} bundled songs from /public/SongBook/!`,
+          text: `Loaded ${saved.length} bundled songs from /public/SongBook/!`,
           type: 'success'
         });
       }
@@ -265,11 +395,21 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
 
   // Reset to default sample library
   const handleResetSampleSongs = async () => {
-    if (confirm('Reset song repository to default ChordPro library?')) {
+    if (confirm('Reset song repository to default ChordPro library? This will replace your active songs.')) {
       setIsLoading(true);
       try {
         const samples = await resetToDefaultSongs();
         onSongsUpdated(samples);
+        const updatedConfig: RepositoryConfig = {
+          ...config,
+          sourceType: 'bundled',
+          directoryPath: '/public/SongBook/',
+          directoryName: 'Bundled /public/SongBook/',
+          lastSyncedAt: Date.now(),
+          totalFilesFound: samples.length,
+        };
+        saveRepositoryConfig(updatedConfig);
+        onConfigChange(updatedConfig);
         setStatusMessage({
           text: `Restored ${samples.length} standard ChordPro songs.`,
           type: 'success'
@@ -291,6 +431,10 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
     setTimeout(() => setCopiedLink(false), 3000);
   };
 
+  const isLocalActive = config.sourceType === 'local-drive';
+  const isGithubActive = config.sourceType === 'github-url';
+  const isBundledActive = config.sourceType === 'bundled';
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div 
@@ -305,7 +449,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-100">SongBook Repository Source</h2>
-              <p className="text-xs text-slate-400">Configure local drive storage (e.g. D:/Songbook/) or shared GitHub URL</p>
+              <p className="text-xs text-slate-400">Switch between Local Drive, GitHub/Shared URL, and /public/SongBook</p>
             </div>
           </div>
           <button
@@ -323,41 +467,55 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('local')}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
+            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
               activeTab === 'local'
                 ? 'bg-amber-500 text-slate-950 shadow-sm font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
             <HardDrive className="w-3.5 h-3.5" />
-            Local Drive (D:/, Folder)
+            <span>Local Drive</span>
+            {isLocalActive && (
+              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-semibold uppercase ${
+                activeTab === 'local' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
+              }`}>Active</span>
+            )}
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('github')}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
+            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
               activeTab === 'github'
                 ? 'bg-amber-500 text-slate-950 shadow-sm font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
             <Github className="w-3.5 h-3.5" />
-            GitHub / Shared URL
+            <span>GitHub / Shared</span>
+            {isGithubActive && (
+              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-semibold uppercase ${
+                activeTab === 'github' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
+              }`}>Active</span>
+            )}
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('bundled')}
-            className={`py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all ${
+            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
               activeTab === 'bundled'
                 ? 'bg-amber-500 text-slate-950 shadow-sm font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
-            title="/public/SongBook/"
           >
             <Folder className="w-3.5 h-3.5" />
-            /public/SongBook
+            <span>/public/SongBook</span>
+            {isBundledActive && (
+              <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-semibold uppercase ${
+                activeTab === 'bundled' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
+              }`}>Active</span>
+            )}
           </button>
         </div>
 
@@ -367,6 +525,24 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           {/* TAB 1: LOCAL DRIVE / FOLDER */}
           {activeTab === 'local' && (
             <div className="space-y-4">
+              {/* Active Switcher Banner */}
+              {!isLocalActive && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3">
+                  <div className="text-xs text-amber-200">
+                    Currently viewing another repository source.
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => handleSwitchToSource('local-drive')}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors shrink-0"
+                  >
+                    Switch to Local Drive
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <Folder className="w-3.5 h-3.5 text-amber-400" />
@@ -392,7 +568,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-normal">
-                  Configure your primary local drive location (e.g. <code className="text-amber-300 font-mono">D:/Songbook/</code> or <code className="text-amber-300 font-mono">/Music/ChordPro/</code>).
+                  Configure your primary local drive location (e.g. <code className="text-amber-300 font-mono">D:/Songbook/</code>).
                 </p>
               </div>
 
@@ -411,7 +587,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     Select Folder on Drive
                   </div>
                   <span className="text-[11px] text-slate-400 group-hover:text-slate-300 leading-snug">
-                    Select a local folder on <code className="text-amber-300">D:</code> or any drive to sync all songs directly.
+                    Select a local folder on <code className="text-amber-300 font-mono">D:/</code> to load and show only its songs.
                   </span>
                 </button>
 
@@ -425,7 +601,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     Upload ChordPro Files
                   </div>
                   <span className="text-[11px] text-slate-400 group-hover:text-slate-300 leading-snug">
-                    Import one or multiple <code className="text-sky-300 font-mono">.cho</code>, <code className="text-sky-300 font-mono">.crd</code>, or <code className="text-sky-300 font-mono">.txt</code> files.
+                    Upload <code className="text-sky-300 font-mono">.cho</code>, <code className="text-sky-300 font-mono">.crd</code>, or <code className="text-sky-300 font-mono">.txt</code> files for this repository.
                   </span>
                   <input
                     id="file-upload-input"
@@ -443,6 +619,24 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           {/* TAB 2: GITHUB / SHARED URL */}
           {activeTab === 'github' && (
             <div className="space-y-4">
+              {/* Active Switcher Banner */}
+              {!isGithubActive && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3">
+                  <div className="text-xs text-amber-200">
+                    Currently viewing another repository source.
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => handleSwitchToSource('github-url')}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors shrink-0"
+                  >
+                    Switch to GitHub
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -471,7 +665,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-normal">
-                  Paste your public GitHub folder link (e.g. <code className="text-amber-300 font-mono">https://github.com/gitongsy28/SongScroll/tree/main/public/SongBook/</code>). All <code className="text-sky-300 font-mono">.cho</code> files will be fetched and synced.
+                  Paste your public GitHub folder link. All <code className="text-sky-300 font-mono">.cho</code> and <code className="text-sky-300 font-mono">.txt</code> files will be loaded and replace previous songs cleanly.
                 </p>
               </div>
 
@@ -492,7 +686,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Anyone who opens this link will automatically load and sync your GitHub song collection upon opening the app.
+                  Opening this link automatically sets this GitHub song collection upon launch.
                 </p>
               </div>
             </div>
@@ -501,13 +695,39 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           {/* TAB 3: BUNDLED /public/SongBook/ */}
           {activeTab === 'bundled' && (
             <div className="space-y-4">
+              {/* Active Switcher Banner */}
+              {!isBundledActive && (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-center justify-between gap-3">
+                  <div className="text-xs text-amber-200">
+                    Currently viewing another repository source.
+                  </div>
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => handleSwitchToSource('bundled')}
+                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors shrink-0"
+                  >
+                    Switch to /public/SongBook/
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
               <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl space-y-3">
-                <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs">
-                  <Folder className="w-4 h-4 text-amber-400" />
-                  Bundled <code className="text-amber-300 font-mono">/public/SongBook/</code> Directory
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-slate-200 font-semibold text-xs">
+                    <Folder className="w-4 h-4 text-amber-400" />
+                    Bundled <code className="text-amber-300 font-mono">/public/SongBook/</code> Directory
+                  </div>
+                  {isBundledActive && (
+                    <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Active Source
+                    </span>
+                  )}
                 </div>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Files placed inside the web app's <code className="text-sky-300 font-mono">/public/SongBook/</code> folder are served with the app and can be restored or synced at any time.
+                  Files stored inside the web app's <code className="text-sky-300 font-mono">/public/SongBook/</code> folder are served directly with the application (including custom added files).
                 </p>
                 <div className="pt-1 flex gap-2">
                   <button
@@ -550,7 +770,11 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
             <div className="flex justify-between items-center text-slate-400">
               <span>Active Storage Source:</span>
               <span className="font-mono text-amber-300/90 truncate max-w-[280px]">
-                {config.directoryPath || 'D:/Songbook/'}
+                {config.sourceType === 'bundled'
+                  ? '/public/SongBook/'
+                  : config.sourceType === 'github-url'
+                  ? (config.githubUrl || config.directoryPath)
+                  : (config.directoryPath || 'D:/Songbook/')}
               </span>
             </div>
             {config.lastSyncedAt && (

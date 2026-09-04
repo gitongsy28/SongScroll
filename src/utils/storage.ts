@@ -1,5 +1,5 @@
-import { RepositoryConfig, Song, ViewerSettings } from '../types';
-import { createSongFromChordPro } from './chordpro';
+import { RepositoryConfig, RepositorySourceType, Song, ViewerSettings } from '../types';
+import { createSongFromChordPro, deduplicateSongs } from './chordpro';
 import { getInitialSongs } from './sampleSongs';
 
 const DB_NAME = 'chordpro_reader_db';
@@ -10,6 +10,7 @@ const STORE_CONFIG = 'config';
 const STORAGE_KEY_REPO = 'chordpro_repo_config';
 const STORAGE_KEY_SETTINGS = 'chordpro_viewer_settings';
 const STORAGE_KEY_FALLBACK_SONGS = 'chordpro_local_songs_fallback';
+const STORAGE_PREFIX_SOURCE_SONGS = 'chordpro_source_songs_';
 
 export const DEFAULT_VIEWER_SETTINGS: ViewerSettings = {
   isScrolling: false,
@@ -27,8 +28,9 @@ export const DEFAULT_VIEWER_SETTINGS: ViewerSettings = {
 };
 
 export const DEFAULT_REPO_CONFIG: RepositoryConfig = {
-  directoryPath: '/Music/ChordPro/',
-  directoryName: 'Local ChordPro Repository',
+  sourceType: 'bundled',
+  directoryPath: '/public/SongBook/',
+  directoryName: 'Bundled SongBook',
   isFileSystemApiSupported: typeof window !== 'undefined' && 'showDirectoryPicker' in window,
   hasDirectoryHandle: false,
   lastSyncedAt: undefined,
@@ -73,6 +75,91 @@ function openDB(): Promise<IDBDatabase> {
 }
 
 /**
+ * Save songs for a specific repository source type (e.g. 'local-drive', 'github-url', 'bundled')
+ */
+export function saveSourceSongs(sourceType: RepositorySourceType, songs: Song[]): void {
+  try {
+    const unique = deduplicateSongs(songs);
+    localStorage.setItem(`${STORAGE_PREFIX_SOURCE_SONGS}${sourceType}`, JSON.stringify(unique));
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Load cached songs for a specific repository source type
+ */
+export function loadSourceSongs(sourceType: RepositorySourceType): Song[] | null {
+  try {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX_SOURCE_SONGS}${sourceType}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return deduplicateSongs(parsed);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+/**
+ * Clear all songs in the active store
+ */
+export async function clearAllSongs(): Promise<void> {
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_SONGS, 'readwrite');
+      const store = tx.objectStore(STORE_SONGS);
+      const req = store.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    try {
+      localStorage.removeItem(STORAGE_KEY_FALLBACK_SONGS);
+    } catch {}
+  }
+}
+
+/**
+ * Replace active songs completely with a clean, deduplicated set of songs.
+ * Clears out any prior songs, preventing duplicate accumulation.
+ */
+export async function replaceActiveSongs(songs: Song[], sourceType?: RepositorySourceType): Promise<Song[]> {
+  const uniqueSongs = deduplicateSongs(songs);
+
+  try {
+    const db = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_SONGS, 'readwrite');
+      const store = tx.objectStore(STORE_SONGS);
+      
+      const clearReq = store.clear();
+      clearReq.onsuccess = () => {
+        uniqueSongs.forEach((song) => store.put(song));
+      };
+      clearReq.onerror = () => reject(clearReq.error);
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    try {
+      localStorage.setItem(STORAGE_KEY_FALLBACK_SONGS, JSON.stringify(uniqueSongs));
+    } catch {}
+  }
+
+  if (sourceType) {
+    saveSourceSongs(sourceType, uniqueSongs);
+  }
+
+  return uniqueSongs;
+}
+
+/**
  * Load all songs from IndexedDB or initial sample dataset
  */
 export async function loadAllSongs(): Promise<Song[]> {
@@ -83,24 +170,30 @@ export async function loadAllSongs(): Promise<Song[]> {
       const store = tx.objectStore(STORE_SONGS);
       const req = store.getAll();
 
-      req.onsuccess = () => {
+      req.onsuccess = async () => {
         const results = req.result as Song[];
         if (results && results.length > 0) {
-          resolve(results);
+          const deduped = deduplicateSongs(results);
+          // If duplicates were detected in IndexedDB from previous runs, clean the store immediately
+          if (deduped.length !== results.length) {
+            await replaceActiveSongs(deduped);
+          }
+          resolve(deduped);
         } else {
           // Initialize with sample songs
           const samples = getInitialSongs();
-          saveMultipleSongs(samples).then(() => resolve(samples));
+          await replaceActiveSongs(samples, 'bundled');
+          resolve(samples);
         }
       };
 
       req.onerror = () => {
-        const fallback = loadFallbackSongs();
+        const fallback = deduplicateSongs(loadFallbackSongs());
         resolve(fallback);
       };
     });
   } catch (err) {
-    return loadFallbackSongs();
+    return deduplicateSongs(loadFallbackSongs());
   }
 }
 
@@ -123,21 +216,22 @@ export async function saveSong(song: Song): Promise<void> {
 }
 
 /**
- * Save multiple songs at once
+ * Save multiple songs at once with deduplication
  */
 export async function saveMultipleSongs(songs: Song[]): Promise<void> {
+  const uniqueSongs = deduplicateSongs(songs);
   try {
     const db = await openDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE_SONGS, 'readwrite');
       const store = tx.objectStore(STORE_SONGS);
-      songs.forEach((s) => store.put(s));
+      uniqueSongs.forEach((s) => store.put(s));
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
     });
   } catch (err) {
     try {
-      localStorage.setItem(STORAGE_KEY_FALLBACK_SONGS, JSON.stringify(songs));
+      localStorage.setItem(STORAGE_KEY_FALLBACK_SONGS, JSON.stringify(uniqueSongs));
     } catch {
       // ignore
     }
@@ -167,22 +261,8 @@ export async function deleteSong(songId: string): Promise<void> {
  * Reset library back to original sample songs
  */
 export async function resetToDefaultSongs(): Promise<Song[]> {
-  try {
-    const db = await openDB();
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE_SONGS, 'readwrite');
-      const store = tx.objectStore(STORE_SONGS);
-      const req = store.clear();
-      req.onsuccess = () => resolve();
-      req.onerror = () => reject(req.error);
-    });
-  } catch {
-    localStorage.removeItem(STORAGE_KEY_FALLBACK_SONGS);
-  }
-
   const samples = getInitialSongs();
-  await saveMultipleSongs(samples);
-  return samples;
+  return replaceActiveSongs(samples, 'bundled');
 }
 
 /**
@@ -203,9 +283,16 @@ export function loadRepositoryConfig(): RepositoryConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_REPO);
     if (raw) {
+      const parsed = JSON.parse(raw);
+      const inferredSource: RepositorySourceType = 
+        parsed.sourceType || 
+        (parsed.directoryPath?.includes('/public/SongBook') || parsed.directoryPath === '/SongBook/' ? 'bundled' : 
+         parsed.directoryPath?.includes('github.com') ? 'github-url' : 'local-drive');
+
       return {
         ...DEFAULT_REPO_CONFIG,
-        ...JSON.parse(raw),
+        ...parsed,
+        sourceType: inferredSource,
         isFileSystemApiSupported: typeof window !== 'undefined' && 'showDirectoryPicker' in window,
       };
     }
@@ -303,7 +390,7 @@ export async function syncSongsFromDirectoryHandle(dirHandle: any, customDirPath
   }
 
   await scanDirectory(dirHandle, customDirPath.replace(/\/$/, ''));
-  return songs;
+  return deduplicateSongs(songs);
 }
 
 /**
@@ -328,7 +415,7 @@ export async function parseUploadedFiles(fileList: FileList | File[], customDirP
     }
   }
 
-  return songs;
+  return deduplicateSongs(songs);
 }
 
 /**

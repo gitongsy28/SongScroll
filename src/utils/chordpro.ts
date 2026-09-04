@@ -376,11 +376,48 @@ export function serializeChordPro(parsed: ParsedChordPro, transposeSemitones: nu
 }
 
 /**
+ * Generates a stable deterministic ID for a song based on filename or artist + title
+ */
+export function generateDeterministicSongId(title: string, artist: string, fileName?: string): string {
+  const cleanSource = (fileName || `${artist} - ${title}`)
+    .toLowerCase()
+    .trim()
+    .replace(/\.[a-z0-9]+$/i, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return `song_${cleanSource || 'untitled'}`;
+}
+
+/**
+ * Deduplicates an array of songs, preserving unique songs by ID and normalized Artist+Title
+ */
+export function deduplicateSongs(songs: Song[]): Song[] {
+  const seenIds = new Set<string>();
+  const seenKeys = new Set<string>();
+  const uniqueSongs: Song[] = [];
+
+  for (const song of songs) {
+    const normKey = `${(song.artist || '').trim().toLowerCase()}:::${(song.title || '').trim().toLowerCase()}`;
+    const id = song.id;
+
+    if (!seenIds.has(id) && (!normKey || normKey === ':::' || !seenKeys.has(normKey))) {
+      seenIds.add(id);
+      if (normKey && normKey !== ':::') {
+        seenKeys.add(normKey);
+      }
+      uniqueSongs.push(song);
+    }
+  }
+
+  return uniqueSongs;
+}
+
+/**
  * Creates a Song object from raw ChordPro text
  */
-export function createSongFromChordPro(rawText: string, filePath?: string, fileName?: string): Song {
+export function createSongFromChordPro(rawText: string, filePath?: string, fileName?: string, explicitId?: string): Song {
   const parsed = parseChordPro(rawText);
-  const id = 'song_' + Math.random().toString(36).substring(2, 9) + '_' + Date.now().toString(36);
+  const id = explicitId || generateDeterministicSongId(parsed.title, parsed.artist, fileName);
   
   return {
     id,
