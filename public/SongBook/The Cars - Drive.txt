@@ -1,0 +1,49 @@
+{title: 80s - The Cars - Drive}
+{artist: The Cars}
+{key: B}
+{capo: 2}
+{tempo: 83}
+{time: 4/4}
+{duration: 3:55}
+{comment: Key: B Major (A shapes with capo 2) | Capo: 2nd fret | Tempo: ~83 BPM (ballad feel; some analyses ~111) | Time: 4/4 | Duration: 3:55 | Year: 1984 (from album Heartbeat City)}
+
+{c: Intro}
+[A] [Amaj7] [A]
+[A] [Amaj7] [A]
+
+{c: Verse 1}
+[A]Who's gonna tell you when [Amaj7]it's too late [A]
+[A]Who's gonna tell you things [Amaj7]aren't so great [A]
+
+{c: Chorus}
+[F#m]You can't go on [B]thinkin' nothing's wrong
+[A/E]Who's gonna drive you home to[E]night [A]
+
+{c: Verse 2}
+[A]Who's gonna pick you up [Amaj7]when you fall [A]
+[A]Who's gonna hang it up [Amaj7]when you call [A]
+[A]Who's gonna pay attention [Amaj7]to your dreams [A]
+[A]And who's gonna plug their ears [Amaj7]when you scream [A]
+
+{c: Chorus}
+[F#m]You can't go on [B]thinkin' nothing's wrong
+[A/E]Who's gonna drive you home to[E]night [A]
+
+{c: Bridge / Instrumental}
+[A] [Amaj7] [A]
+[A] [Amaj7] [A]
+
+{c: Verse 3}
+[A]Who's gonna hold you down [Amaj7]when you shake [A]
+[A]Who's gonna come around [Amaj7]when you break [A]
+
+{c: Chorus}
+[F#m]You can't go on [B]thinkin' nothing's wrong
+[A/E]Who's gonna drive you home to[E]night [A]
+
+[F#m]You can't go on [B]thinkin' nothing's wrong
+[A/E]Who's gonna drive you home to[E]night [A]
+
+{c: Outro}
+[A] [Amaj7] [A]
+(Who's gonna drive you home tonight...)
