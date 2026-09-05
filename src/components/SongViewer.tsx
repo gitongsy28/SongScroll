@@ -26,9 +26,10 @@ import {
   Edit
 } from 'lucide-react';
 import { ChordProLine, ChordSegment, ParsedChordPro, Song, ViewerSettings, VisualTheme } from '../types';
-import { generateSummaryLines, getGuitarChord, serializeChordPro, transposeChord, transposeNote } from '../utils/chordpro';
+import { generateSummaryLines, serializeChordPro, transposeChord, transposeNote } from '../utils/chordpro';
 import { downloadSongFile } from '../utils/storage';
 import { Metronome } from './Metronome';
+import { ChordDiagram } from './ChordDiagram';
 
 interface SongViewerProps {
   song: Song;
@@ -514,14 +515,19 @@ export const SongViewer: React.FC<SongViewerProps> = ({
 
             <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
               {originalKey && (
-                <span className="px-2.5 py-1 bg-sky-950/70 border border-sky-800/60 text-sky-300 rounded-lg">
-                  Original: {originalKey}
+                <button
+                  type="button"
+                  onClick={() => setActiveChordDiagram(currentKey || originalKey)}
+                  className="px-2.5 py-1 bg-sky-950/70 hover:bg-sky-900/80 border border-sky-800/60 text-sky-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                  title={`View guitar chord diagram for ${currentKey || originalKey}`}
+                >
+                  <span>Key: {originalKey}</span>
                   {transposeOffset !== 0 && (
                     <span className="text-amber-400 font-bold ml-1">
                       ➔ {currentKey} ({transposeOffset > 0 ? `+${transposeOffset}` : transposeOffset})
                     </span>
                   )}
-                </span>
+                </button>
               )}
               {parsed.capo !== undefined && parsed.capo > 0 && (
                 <span className="px-2.5 py-1 bg-purple-950/70 border border-purple-800/60 text-purple-300 rounded-lg">
@@ -1023,71 +1029,13 @@ const RenderLine: React.FC<RenderLineProps> = ({
 
 // Guitar Chord Diagram popup
 const ChordDiagramModal: React.FC<{ chord: string; onClose: () => void }> = ({ chord, onClose }) => {
-  const fingering = getGuitarChord(chord);
-
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm animate-in fade-in duration-150"
       onClick={onClose}
     >
-      <div 
-        className="bg-slate-900 border border-slate-700 rounded-2xl p-5 shadow-2xl max-w-xs w-full text-center space-y-3"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-          <div className="flex items-center gap-2">
-            <Guitar className="w-4 h-4 text-amber-400" />
-            <h3 className="font-bold text-base text-slate-100">{chord} Chord</h3>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 text-xs">
-            ✕
-          </button>
-        </div>
-
-        {fingering ? (
-          <div className="space-y-3">
-            {/* Visual 6-string chart */}
-            <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 flex flex-col items-center">
-              <div className="text-[10px] text-slate-400 font-mono mb-2">
-                Strings: E &bull; A &bull; D &bull; G &bull; B &bull; e
-              </div>
-              <div className="flex gap-2 font-mono text-sm font-bold text-amber-300">
-                {fingering.frets.map((fret, i) => (
-                  <div key={i} className="flex flex-col items-center">
-                    <span className="text-[10px] text-slate-500">
-                      {['E', 'A', 'D', 'G', 'B', 'e'][i]}
-                    </span>
-                    <span className={`p-1 rounded w-6 text-center ${
-                      fret === -1 ? 'text-rose-400' : fret === 0 ? 'text-emerald-400' : 'bg-slate-800 text-amber-300'
-                    }`}>
-                      {fret === -1 ? 'X' : fret === 0 ? 'O' : fret}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {fingering.baseFret && (
-                <div className="text-[11px] text-slate-400 mt-2">
-                  Starting at Fret {fingering.baseFret} {fingering.barre ? `(Barre)` : ''}
-                </div>
-              )}
-            </div>
-            <p className="text-[11px] text-slate-400">
-              X = Mute &bull; O = Open string &bull; Numbers = Fret numbers
-            </p>
-          </div>
-        ) : (
-          <div className="py-4 text-xs text-slate-400">
-            Fingering diagram for <span className="font-bold text-amber-300">{chord}</span> is standard barre / open voicing.
-          </div>
-        )}
-
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold"
-        >
-          Close
-        </button>
+      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm">
+        <ChordDiagram chordName={chord} onClose={onClose} />
       </div>
     </div>
   );
