@@ -13,7 +13,8 @@ import {
   Copy, 
   Github,
   CheckCircle2,
-  ArrowRight
+  ArrowRight,
+  ExternalLink
 } from 'lucide-react';
 import { RepositoryConfig, RepositorySourceType, Song } from '../types';
 import { 
@@ -24,7 +25,10 @@ import {
   syncSongsFromDirectoryHandle,
   replaceActiveSongs,
   loadSourceSongs,
-  clearAllSongs
+  clearAllSongs,
+  isMasterFolderConnected,
+  getConnectedFolderName,
+  restoreActiveDirectoryHandle
 } from '../utils/storage';
 import { parseGitHubUrl, syncBundledSongBook, syncSongsFromGitHubUrl } from '../utils/githubSync';
 
@@ -467,14 +471,14 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('local')}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
+            className={`flex-1 py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
               activeTab === 'local'
                 ? 'bg-amber-500 text-slate-950 shadow-sm font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
             <HardDrive className="w-3.5 h-3.5" />
-            <span>Local Drive</span>
+            <span>Master Repo (Local / Cloud)</span>
             {isLocalActive && (
               <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-semibold uppercase ${
                 activeTab === 'local' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
@@ -485,14 +489,14 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('github')}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
+            className={`flex-1 py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
               activeTab === 'github'
                 ? 'bg-amber-500 text-slate-950 shadow-sm font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
             <Github className="w-3.5 h-3.5" />
-            <span>GitHub / Shared</span>
+            <span>GitHub (Read-Only)</span>
             {isGithubActive && (
               <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-semibold uppercase ${
                 activeTab === 'github' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
@@ -503,14 +507,14 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('bundled')}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
+            className={`flex-1 py-2 px-2.5 rounded-lg flex items-center justify-center gap-1.5 transition-all relative ${
               activeTab === 'bundled'
                 ? 'bg-amber-500 text-slate-950 shadow-sm font-bold'
                 : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
             }`}
           >
             <Folder className="w-3.5 h-3.5" />
-            <span>/public/SongBook</span>
+            <span>Bundled (Read-Only)</span>
             {isBundledActive && (
               <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-semibold uppercase ${
                 activeTab === 'bundled' ? 'bg-slate-950/30 text-slate-950' : 'bg-emerald-500/20 text-emerald-300'
@@ -522,7 +526,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
         {/* Body Content */}
         <div className="p-5 overflow-y-auto space-y-4 text-sm text-slate-300">
           
-          {/* TAB 1: LOCAL DRIVE / FOLDER */}
+          {/* TAB 1: MASTER REPOSITORY (LOCAL / CLOUD DRIVE) */}
           {activeTab === 'local' && (
             <div className="space-y-4">
               {/* Active Switcher Banner */}
@@ -537,16 +541,84 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     onClick={() => handleSwitchToSource('local-drive')}
                     className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors shrink-0"
                   >
-                    Switch to Local Drive
+                    Switch to Master Repo
                     <ArrowRight className="w-3 h-3" />
                   </button>
+                </div>
+              )}
+
+              {/* Master Repository Explanation Card */}
+              <div className="p-3.5 bg-emerald-950/30 border border-emerald-500/30 rounded-xl text-xs space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-emerald-300">
+                  <HardDrive className="w-4 h-4 text-emerald-400" />
+                  <span>Master Repository (Physical Disk Overwrite Enabled)</span>
+                </div>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  Treat this as your <strong>Master Repository</strong>. It can be a local drive path (e.g. <code className="text-amber-300 font-mono">D:/Songbook/</code>) or a cloud-synced shared folder (such as <strong>Google Drive for Desktop</strong>, <strong>OneDrive</strong>, or a local URL shared drive).
+                </p>
+                <div className="text-[11px] text-emerald-200/90 pt-1 flex items-center gap-1.5 font-medium">
+                  <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  <span>When in Master Repository, clicking <strong>"Save Song"</strong> physically overwrites the <code className="text-amber-300 font-mono">.cho</code> / <code className="text-amber-300 font-mono">.txt</code> file on disk and updates the app database immediately!</span>
+                </div>
+              </div>
+
+              {/* Master Folder Physical Access Status Banner */}
+              {isMasterFolderConnected() ? (
+                <div className="p-3 bg-emerald-950/40 border border-emerald-500/40 rounded-xl flex items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 text-emerald-200">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                    <span>
+                      <strong className="text-emerald-300">Drive Folder Connected:</strong> "{getConnectedFolderName()}"
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-emerald-300 font-semibold bg-emerald-900/60 px-2.5 py-1 rounded-lg border border-emerald-500/40 shrink-0">
+                    Disk Overwrites Active
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3.5 bg-amber-950/50 border border-amber-500/40 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200">
+                  <div className="space-y-1">
+                    <div className="font-bold flex items-center gap-1.5 text-amber-300">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      One-Time Step: Connect Your Master Folder
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-snug">
+                      Browsers require a one-time permission grant to save files directly to your hard drive. Click <strong>"Select Master Folder"</strong> to grant write access.
+                    </p>
+                    {typeof window !== 'undefined' && window.self !== window.top && (
+                      <p className="text-[10px] text-amber-300/90 font-medium">
+                        (Note: Embedded preview windows block disk writing. Open SongScroll in a new tab to link your drive.)
+                      </p>
+                    )}
+                  </div>
+                  {typeof window !== 'undefined' && window.self !== window.top ? (
+                    <a
+                      href={window.location.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors shrink-0 self-start sm:self-center"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Open in New Tab
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={isLoading}
+                      onClick={handlePickNativeDirectory}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors shrink-0 self-start sm:self-center"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Connect Folder Now
+                    </button>
+                  )}
                 </div>
               )}
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
                   <Folder className="w-3.5 h-3.5 text-amber-400" />
-                  Local Drive Path
+                  Master Repository Folder or URL Path
                 </label>
                 <div className="flex gap-2">
                   <input
@@ -554,7 +626,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                     type="text"
                     value={customPath}
                     onChange={(e) => setCustomPath(e.target.value)}
-                    placeholder="D:/Songbook/ or C:\Songs\ChordPro or /Music/ChordPro/"
+                    placeholder="D:/Songbook/ or G:/My Drive/SongBook/ or OneDrive/SongBook/"
                     className="flex-1 px-3.5 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-200 font-mono text-xs focus:outline-none focus:border-amber-400 transition-colors"
                   />
                   <button
@@ -568,7 +640,7 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   </button>
                 </div>
                 <p className="text-[11px] text-slate-400 leading-normal">
-                  Configure your primary local drive location (e.g. <code className="text-amber-300 font-mono">D:/Songbook/</code>).
+                  Configure your primary directory or synced Google Drive / OneDrive path.
                 </p>
               </div>
 
@@ -580,14 +652,14 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   type="button"
                   disabled={isLoading}
                   onClick={handlePickNativeDirectory}
-                  className="p-3.5 bg-gradient-to-br from-amber-500/10 to-amber-600/5 hover:from-amber-500/20 hover:to-amber-600/15 border border-amber-500/30 rounded-xl text-left flex flex-col gap-1.5 transition-all group active:scale-98"
+                  className="p-3.5 bg-gradient-to-br from-emerald-500/10 to-amber-500/10 hover:from-emerald-500/20 hover:to-amber-500/20 border border-emerald-500/30 rounded-xl text-left flex flex-col gap-1.5 transition-all group active:scale-98"
                 >
-                  <div className="flex items-center gap-2 text-amber-400 font-semibold text-xs">
+                  <div className="flex items-center gap-2 text-emerald-400 font-semibold text-xs">
                     <FolderOpen className="w-4 h-4" />
-                    Select Folder on Drive
+                    Select Master Folder (Drive / Google Drive / OneDrive)
                   </div>
                   <span className="text-[11px] text-slate-400 group-hover:text-slate-300 leading-snug">
-                    Select a local folder on <code className="text-amber-300 font-mono">D:/</code> to load and show only its songs.
+                    Connect local folder or synced cloud drive folder to enable <strong>direct file overwrite</strong> upon saving.
                   </span>
                 </button>
 
@@ -636,6 +708,17 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* GitHub Read-Only Notice Card */}
+              <div className="p-3.5 bg-sky-950/30 border border-sky-500/30 rounded-xl text-xs space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-sky-300">
+                  <Github className="w-4 h-4 text-sky-400" />
+                  <span>GitHub Repository (Read-Only Web Source)</span>
+                </div>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  Songs are synchronized over the web from GitHub. When you edit and click <strong>"Save Song"</strong>, changes are saved to your local device database only — the remote file on GitHub is not updated.
+                </p>
+              </div>
 
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
@@ -712,6 +795,17 @@ export const DirectoryPickerModal: React.FC<DirectoryPickerModalProps> = ({
                   </button>
                 </div>
               )}
+
+              {/* Bundled Read-Only Notice Card */}
+              <div className="p-3.5 bg-slate-950/40 border border-slate-700/60 rounded-xl text-xs space-y-1.5">
+                <div className="flex items-center gap-2 font-bold text-amber-300">
+                  <Folder className="w-4 h-4 text-amber-400" />
+                  <span>Bundled SongBook (Read-Only Static Source)</span>
+                </div>
+                <p className="text-slate-300 text-[11px] leading-relaxed">
+                  Songs are read statically from the application's built-in files. When you edit and click <strong>"Save Song"</strong>, changes are saved to your local device database only — the bundled static files are not modified.
+                </p>
+              </div>
 
               <div className="p-4 bg-slate-950/70 border border-slate-800 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">

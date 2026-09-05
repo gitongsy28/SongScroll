@@ -417,7 +417,10 @@ export function deduplicateSongs(songs: Song[]): Song[] {
  */
 export function createSongFromChordPro(rawText: string, filePath?: string, fileName?: string, explicitId?: string): Song {
   const parsed = parseChordPro(rawText);
-  const id = explicitId || generateDeterministicSongId(parsed.title, parsed.artist, fileName);
+  const derivedFileName = fileName || 
+    (filePath ? filePath.split(/[/\\]/).pop() : undefined) || 
+    `${parsed.artist ? `${parsed.artist} - ` : ''}${parsed.title || 'Untitled'}.cho`;
+  const id = explicitId || generateDeterministicSongId(parsed.title, parsed.artist, derivedFileName);
   
   return {
     id,
@@ -433,7 +436,7 @@ export function createSongFromChordPro(rawText: string, filePath?: string, fileN
     rawChordPro: rawText,
     parsed,
     filePath: filePath || '',
-    fileName: fileName || `${parsed.artist} - ${parsed.title}.cho`,
+    fileName: derivedFileName,
     dateAdded: Date.now(),
     updatedAt: Date.now(),
   };

@@ -1,7 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Edit3, Plus, Save, X, Eye, FileText, Check, Music } from 'lucide-react';
-import { Song } from '../types';
+import { Edit3, Plus, Save, X, Eye, FileText, Check, Music, HardDrive, Github, Folder, AlertCircle, Download, FolderOpen, ExternalLink } from 'lucide-react';
+import { RepositoryConfig, Song } from '../types';
 import { createSongFromChordPro, parseChordPro } from '../utils/chordpro';
+import { 
+  isMasterFolderConnected, 
+  getConnectedFolderName, 
+  setDirectoryHandle, 
+  downloadSongFile, 
+  restoreActiveDirectoryHandle 
+} from '../utils/storage';
 
 interface ChordEditorModalProps {
   isOpen: boolean;
@@ -9,6 +16,7 @@ interface ChordEditorModalProps {
   songToEdit?: Song | null;
   onSaveSong: (savedSong: Song) => void;
   defaultDirPath: string;
+  repoConfig?: RepositoryConfig;
 }
 
 const TEMPLATE_CHORDPRO = `{title: My New Song}
@@ -38,9 +46,15 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
   songToEdit,
   onSaveSong,
   defaultDirPath,
+  repoConfig,
 }) => {
   const [content, setContent] = useState('');
   const [previewMode, setPreviewMode] = useState(false);
+  const [folderConnected, setFolderConnected] = useState(isMasterFolderConnected());
+  const [connectedName, setConnectedName] = useState<string | null>(getConnectedFolderName());
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
 
   useEffect(() => {
     if (songToEdit) {
@@ -50,17 +64,89 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
     }
   }, [songToEdit, isOpen]);
 
+  useEffect(() => {
+    if (isOpen) {
+      restoreActiveDirectoryHandle().then((handle) => {
+        if (handle) {
+          setFolderConnected(true);
+          setConnectedName(handle.name);
+        } else {
+          setFolderConnected(isMasterFolderConnected());
+          setConnectedName(getConnectedFolderName());
+        }
+      });
+    }
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   const parsed = parseChordPro(content);
+
+  const isMasterRepo = !repoConfig || repoConfig.sourceType === 'local-drive';
+  const isGithubRepo = repoConfig?.sourceType === 'github-url';
+  const isBundledRepo = repoConfig?.sourceType === 'bundled';
+
+  const targetFileName = songToEdit?.fileName || `${parsed.artist || 'Artist'} - ${parsed.title || 'Untitled'}.cho`;
+
+  const handleConnectFolder = async () => {
+    if (typeof window === 'undefined' || !('showDirectoryPicker' in window)) {
+      alert('File System Access API is not supported in this browser. Please open SongScroll in Google Chrome or Microsoft Edge.');
+      return;
+    }
+    if (isIframe) {
+      window.open(window.location.href, '_blank');
+      return;
+    }
+    try {
+      setIsConnecting(true);
+      const handle = await (window as any).showDirectoryPicker({
+        id: 'chordpro-repo-picker',
+        mode: 'readwrite',
+      });
+      if (handle) {
+        setDirectoryHandle(handle);
+        setFolderConnected(true);
+        setConnectedName(handle.name);
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.warn('Folder connect error:', err);
+      }
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleDownloadCho = () => {
+    const filePath = songToEdit?.filePath || `${defaultDirPath}/${targetFileName}`;
+    const songToDownload: Song = {
+      id: songToEdit?.id || 'temp',
+      title: parsed.title || 'Untitled Song',
+      artist: parsed.artist || 'Unknown Artist',
+      subtitle: parsed.subtitle,
+      key: parsed.key,
+      era: parsed.era,
+      tempo: parsed.tempo || 100,
+      timeSignature: parsed.timeSignature || '4/4',
+      capo: parsed.capo,
+      duration: parsed.duration,
+      rawChordPro: content,
+      parsed,
+      filePath,
+      fileName: targetFileName,
+      dateAdded: songToEdit?.dateAdded || Date.now(),
+      updatedAt: Date.now(),
+    };
+    downloadSongFile(songToDownload);
+  };
 
   const handleInsertDirective = (snippet: string) => {
     setContent((prev) => prev + (prev.endsWith('\n') ? '' : '\n') + snippet + '\n');
   };
 
   const handleSave = () => {
-    const fileName = `${parsed.artist} - ${parsed.title}.cho`;
-    const filePath = songToEdit?.filePath || `${defaultDirPath}/${fileName}`;
+    // Keep exact file name if editing existing song, else generate clean ChordPro name
+    const filePath = songToEdit?.filePath || `${defaultDirPath}/${targetFileName}`;
     
     const updated: Song = {
       id: songToEdit?.id || ('song_' + Math.random().toString(36).substring(2, 9)),
@@ -76,7 +162,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
       rawChordPro: content,
       parsed,
       filePath,
-      fileName,
+      fileName: targetFileName,
       dateAdded: songToEdit?.dateAdded || Date.now(),
       updatedAt: Date.now(),
     };
@@ -108,6 +194,17 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              id="download-cho-btn"
+              type="button"
+              onClick={handleDownloadCho}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors border border-slate-700"
+              title="Download raw .cho file to your computer"
+            >
+              <Download className="w-3.5 h-3.5 text-sky-400" />
+              <span className="hidden sm:inline">Download .cho</span>
+            </button>
+
             <button
               id="toggle-preview-mode"
               type="button"
@@ -142,6 +239,92 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
           </div>
         </div>
+
+        {/* Repository Save Mode Banner */}
+        {isMasterRepo ? (
+          folderConnected ? (
+            <div className="px-5 py-2.5 bg-emerald-950/50 border-b border-emerald-500/40 text-[11px] text-emerald-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 truncate">
+                <span className="flex h-2 w-2 relative shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <HardDrive className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <div className="truncate">
+                  <span className="font-bold text-emerald-300">Master Folder Connected ({connectedName}): </span>
+                  Clicking <span className="font-semibold text-white">Save Song</span> will physically overwrite{' '}
+                  <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono text-[10px] font-bold">
+                    {targetFileName}
+                  </code>{' '}
+                  on your disk and update the app.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleConnectFolder}
+                className="text-[10px] text-emerald-400 hover:text-emerald-300 underline font-medium shrink-0"
+              >
+                Change Folder
+              </button>
+            </div>
+          ) : (
+            <div className="px-5 py-2.5 bg-amber-950/60 border-b border-amber-500/40 text-[11px] text-amber-200 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <div>
+                  <span className="font-bold text-amber-300">Master Folder Not Connected for Disk Overwrite: </span>
+                  <span>
+                    To overwrite <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300 font-mono text-[10px] font-bold">{targetFileName}</code> on your drive, your browser requires one-time folder permission.
+                  </span>
+                  {isIframe && (
+                    <span className="block text-[10px] text-amber-300/80 mt-0.5">
+                      (Note: Embedded preview iframes restrict drive access. Open in a new tab for direct disk overwriting.)
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {isIframe ? (
+                  <a
+                    href={window.location.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    Open in New Tab
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={isConnecting}
+                    onClick={handleConnectFolder}
+                    className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors"
+                  >
+                    <FolderOpen className="w-3 h-3" />
+                    Connect Folder Now
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        ) : isGithubRepo ? (
+          <div className="px-5 py-2 border-b bg-slate-950/80 border-slate-800 text-slate-300 text-[11px] flex items-center gap-2">
+            <Github className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+            <div className="flex-1 truncate">
+              <span className="font-bold text-sky-300">GitHub Shared Repository (Read-Only): </span>
+              Saving updates your local app database immediately. The source file on GitHub is not modified.
+            </div>
+          </div>
+        ) : (
+          <div className="px-5 py-2 border-b bg-slate-950/80 border-slate-800 text-slate-300 text-[11px] flex items-center gap-2">
+            <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <div className="flex-1 truncate">
+              <span className="font-bold text-amber-300">Bundled Repository (/public/SongBook/): </span>
+              Saving updates your local app database immediately. Static bundled files are not modified.
+            </div>
+          </div>
+        )}
 
         {/* Quick Toolbar for Directives */}
         {!previewMode && (

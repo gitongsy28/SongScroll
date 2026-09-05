@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
+import { Check, Info, X, AlertTriangle, Download, FolderOpen } from 'lucide-react';
 import { RepositoryConfig, Song, ViewerSettings } from './types';
 import { 
   deleteSong, 
   loadAllSongs, 
   loadRepositoryConfig, 
   loadViewerSettings, 
+  restoreActiveDirectoryHandle,
   saveMultipleSongs,
   saveRepositoryConfig,
-  saveSong, 
-  saveViewerSettings 
+  saveSongWithDiskOverwrite,
+  saveViewerSettings,
+  downloadSongFile
 } from './utils/storage';
 import { syncSongsFromGitHubUrl } from './utils/githubSync';
 import { SongList } from './components/SongList';
@@ -30,12 +33,21 @@ export default function App() {
   const [isEditorModalOpen, setIsEditorModalOpen] = useState<boolean>(false);
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState<boolean>(false);
   const [songToEdit, setSongToEdit] = useState<Song | null>(null);
+  const [saveToast, setSaveToast] = useState<{ 
+    message: string; 
+    type: 'success' | 'info' | 'warning'; 
+    diskUpdated?: boolean;
+    song?: Song;
+  } | null>(null);
 
   // Load songs on startup & check for shared ?repo= URL parameter
   useEffect(() => {
     async function init() {
       setIsLoading(true);
       try {
+        // Restore local directory handle if permitted
+        await restoreActiveDirectoryHandle();
+
         // Check for ?repo= or ?source= in query params
         const urlParams = new URLSearchParams(window.location.search);
         const sharedRepoUrl = urlParams.get('repo') || urlParams.get('source');
@@ -103,7 +115,7 @@ export default function App() {
   };
 
   const handleSaveSong = async (savedSong: Song) => {
-    await saveSong(savedSong);
+    const result = await saveSongWithDiskOverwrite(savedSong, repoConfig);
     setSongs((prev) => {
       const index = prev.findIndex((s) => s.id === savedSong.id);
       if (index >= 0) {
@@ -118,6 +130,16 @@ export default function App() {
     if (selectedSong && selectedSong.id === savedSong.id) {
       setSelectedSong(savedSong);
     }
+
+    const isMaster = repoConfig.sourceType === 'local-drive';
+
+    setSaveToast({
+      message: result.message,
+      type: result.diskUpdated ? 'success' : (isMaster ? 'warning' : 'info'),
+      diskUpdated: result.diskUpdated,
+      song: savedSong,
+    });
+    setTimeout(() => setSaveToast(null), result.diskUpdated ? 5000 : 10000);
   };
 
   // Delete Song
@@ -187,6 +209,7 @@ export default function App() {
         songToEdit={songToEdit}
         onSaveSong={handleSaveSong}
         defaultDirPath={repoConfig.directoryPath}
+        repoConfig={repoConfig}
       />
 
       {/* Android & PWA Installation Modal */}
@@ -194,6 +217,82 @@ export default function App() {
         isOpen={isAndroidModalOpen}
         onClose={() => setIsAndroidModalOpen(false)}
       />
+
+      {/* Save Song Status Toast */}
+      {saveToast && (
+        <div 
+          id="save-song-feedback-toast"
+          className={`fixed bottom-5 right-5 z-50 max-w-md p-4 rounded-xl shadow-2xl border flex items-start gap-3 backdrop-blur-md transition-all ${
+            saveToast.type === 'success' 
+              ? 'bg-emerald-950/95 border-emerald-500/60 text-emerald-100 shadow-emerald-950/50' 
+              : saveToast.type === 'warning'
+              ? 'bg-amber-950/95 border-amber-500/60 text-amber-100 shadow-amber-950/50'
+              : 'bg-slate-900/95 border-sky-500/60 text-slate-100 shadow-slate-950/60'
+          }`}
+        >
+          <div className={`p-1.5 rounded-lg shrink-0 mt-0.5 ${
+            saveToast.type === 'success' 
+              ? 'bg-emerald-500/20 text-emerald-300' 
+              : saveToast.type === 'warning'
+              ? 'bg-amber-500/20 text-amber-300'
+              : 'bg-sky-500/20 text-sky-300'
+          }`}>
+            {saveToast.type === 'success' ? (
+              <Check className="w-4 h-4" />
+            ) : saveToast.type === 'warning' ? (
+              <AlertTriangle className="w-4 h-4" />
+            ) : (
+              <Info className="w-4 h-4" />
+            )}
+          </div>
+          <div className="flex-1 text-xs">
+            <div className="font-bold text-sm mb-0.5">
+              {saveToast.type === 'success' 
+                ? 'Master Drive Overwrite' 
+                : saveToast.type === 'warning'
+                ? 'Disk Overwrite Not Connected'
+                : 'Song Saved'}
+            </div>
+            <p className="leading-relaxed opacity-90">{saveToast.message}</p>
+
+            {/* Quick Actions if disk write couldn't proceed */}
+            {saveToast.type === 'warning' && (
+              <div className="flex items-center gap-2 mt-2.5 pt-2 border-t border-amber-500/20">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsDirectoryModalOpen(true);
+                    setSaveToast(null);
+                  }}
+                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-sm"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  Connect Folder
+                </button>
+                {saveToast.song && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (saveToast.song) downloadSongFile(saveToast.song);
+                    }}
+                    className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium rounded-lg text-xs flex items-center gap-1.5 transition-colors border border-slate-700"
+                  >
+                    <Download className="w-3.5 h-3.5 text-sky-400" />
+                    Download .cho
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <button 
+            type="button" 
+            onClick={() => setSaveToast(null)}
+            className="text-slate-400 hover:text-slate-200 p-0.5 ml-1 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

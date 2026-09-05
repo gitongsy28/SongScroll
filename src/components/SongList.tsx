@@ -151,17 +151,40 @@ export const SongList: React.FC<SongListProps> = ({
                 type="button"
                 onClick={onOpenDirectoryConfig}
                 className="group flex items-center gap-1.5 text-[11px] text-slate-400 hover:text-amber-300 transition-colors"
-                title="Click to configure local drive (D:/) or shared GitHub repository"
+                title="Click to configure master repository (local / cloud drive) or shared GitHub repository"
               >
-                {repoConfig.sourceType === 'github-url' || (repoConfig.directoryPath && repoConfig.directoryPath.includes('github.com')) ? (
-                  <Github className="w-3 h-3 text-sky-400 shrink-0" />
+                {repoConfig.sourceType === 'local-drive' ? (
+                  <>
+                    <HardDrive className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span className="font-mono truncate max-w-[150px] sm:max-w-[240px] text-slate-300">
+                      {repoConfig.directoryPath || 'D:/Songbook/'}
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded font-sans font-semibold">
+                      Master (Disk Overwrite)
+                    </span>
+                  </>
+                ) : repoConfig.sourceType === 'github-url' || (repoConfig.directoryPath && repoConfig.directoryPath.includes('github.com')) ? (
+                  <>
+                    <Github className="w-3 h-3 text-sky-400 shrink-0" />
+                    <span className="font-mono truncate max-w-[150px] sm:max-w-[240px] text-slate-300">
+                      {repoConfig.directoryPath || 'GitHub'}
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-sky-500/15 border border-sky-500/30 text-sky-300 rounded font-sans font-semibold">
+                      GitHub (Read-Only)
+                    </span>
+                  </>
                 ) : (
-                  <HardDrive className="w-3 h-3 text-amber-400/80 group-hover:text-amber-300 shrink-0" />
+                  <>
+                    <Folder className="w-3 h-3 text-amber-400 shrink-0" />
+                    <span className="font-mono truncate max-w-[150px] sm:max-w-[240px] text-slate-300">
+                      /public/SongBook/
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded font-sans font-semibold">
+                      Bundled (Read-Only)
+                    </span>
+                  </>
                 )}
-                <span className="font-mono truncate max-w-[180px] sm:max-w-[320px]">
-                  {repoConfig.directoryPath || 'D:/Songbook/'}
-                </span>
-                <span className="text-[10px] text-slate-500 group-hover:text-amber-400 font-sans">
+                <span className="text-[10px] text-slate-500 group-hover:text-amber-400 font-sans ml-0.5">
                   (Change)
                 </span>
               </button>
