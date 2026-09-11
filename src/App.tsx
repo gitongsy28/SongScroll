@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Check, Info, X, AlertTriangle, Download, FolderOpen } from 'lucide-react';
+import { Check, Info, X, AlertTriangle, Download, FolderOpen, ExternalLink, Github } from 'lucide-react';
 import { RepositoryConfig, Song, ViewerSettings } from './types';
 import { 
   deleteSong, 
@@ -14,6 +14,7 @@ import {
   downloadSongFile
 } from './utils/storage';
 import { syncSongsFromGitHubUrl } from './utils/githubSync';
+import { parseChordPro } from './utils/chordpro';
 import { SongList } from './components/SongList';
 import { SongViewer } from './components/SongViewer';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
@@ -37,6 +38,7 @@ export default function App() {
     message: string; 
     type: 'success' | 'info' | 'warning'; 
     diskUpdated?: boolean;
+    commitUrl?: string;
     song?: Song;
   } | null>(null);
 
@@ -54,12 +56,13 @@ export default function App() {
 
         if (sharedRepoUrl) {
           try {
-            const { songs: syncedSongs } = await syncSongsFromGitHubUrl(sharedRepoUrl);
+            const currentConfig = loadRepositoryConfig();
+            const { songs: syncedSongs } = await syncSongsFromGitHubUrl(sharedRepoUrl, currentConfig.githubToken);
             if (syncedSongs.length > 0) {
               await saveMultipleSongs(syncedSongs);
               setSongs(syncedSongs);
               const updatedConfig: RepositoryConfig = {
-                ...repoConfig,
+                ...currentConfig,
                 sourceType: 'github-url',
                 githubUrl: sharedRepoUrl,
                 directoryPath: sharedRepoUrl,
@@ -100,6 +103,18 @@ export default function App() {
   // Song selection
   const handleSelectSong = (song: Song, summaryMode = false) => {
     setStartInSummaryMode(summaryMode);
+    let speed = song.scrollSpeed ?? song.parsed?.scrollSpeed;
+    if (speed === undefined && song.rawChordPro) {
+      const p = parseChordPro(song.rawChordPro);
+      if (p.scrollSpeed) {
+        speed = p.scrollSpeed;
+        song.scrollSpeed = p.scrollSpeed;
+        song.parsed = p;
+      }
+    }
+    if (speed && speed > 0) {
+      handleUpdateSettings({ scrollSpeed: speed });
+    }
     setSelectedSong(song);
   };
 
@@ -129,14 +144,19 @@ export default function App() {
     // If currently viewing this song, update active song
     if (selectedSong && selectedSong.id === savedSong.id) {
       setSelectedSong(savedSong);
+      const speed = savedSong.scrollSpeed ?? savedSong.parsed?.scrollSpeed;
+      if (speed && speed > 0) {
+        handleUpdateSettings({ scrollSpeed: speed });
+      }
     }
 
-    const isMaster = repoConfig.sourceType === 'local-drive';
+    const isMaster = repoConfig.sourceType === 'local-drive' || repoConfig.sourceType === 'github-master';
 
     setSaveToast({
       message: result.message,
       type: result.diskUpdated ? 'success' : (isMaster ? 'warning' : 'info'),
       diskUpdated: result.diskUpdated,
+      commitUrl: result.commitUrl,
       song: savedSong,
     });
     setTimeout(() => setSaveToast(null), result.diskUpdated ? 5000 : 10000);
@@ -175,6 +195,8 @@ export default function App() {
           onEditSong={handleEditSong}
           onDeleteSong={handleDeleteSong}
           initialSummaryMode={startInSummaryMode}
+          repoConfig={repoConfig}
+          onSaveSong={handleSaveSong}
         />
       ) : (
         <SongList
@@ -246,14 +268,29 @@ export default function App() {
             )}
           </div>
           <div className="flex-1 text-xs">
-            <div className="font-bold text-sm mb-0.5">
+            <div className="font-bold text-sm mb-0.5 flex items-center gap-1.5">
               {saveToast.type === 'success' 
-                ? 'Master Drive Overwrite' 
+                ? (repoConfig.sourceType === 'github-master' ? 'Master GitHub Committed & Overwritten' : 'Master Drive Overwritten') 
                 : saveToast.type === 'warning'
-                ? 'Disk Overwrite Not Connected'
+                ? (repoConfig.sourceType === 'github-master' ? 'Master GitHub Token Needed' : 'Disk Overwrite Not Connected')
                 : 'Song Saved'}
             </div>
             <p className="leading-relaxed opacity-90">{saveToast.message}</p>
+
+            {saveToast.commitUrl && (
+              <div className="mt-2 pt-1.5 border-t border-emerald-500/30">
+                <a
+                  href={saveToast.commitUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] text-emerald-300 hover:text-emerald-200 font-bold underline"
+                >
+                  <Github className="w-3.5 h-3.5" />
+                  View Commit on GitHub
+                  <ExternalLink className="w-3 h-3 ml-0.5" />
+                </a>
+              </div>
+            )}
 
             {/* Quick Actions if disk write couldn't proceed */}
             {saveToast.type === 'warning' && (

@@ -163,14 +163,24 @@ export const SongList: React.FC<SongListProps> = ({
                       Master (Disk Overwrite)
                     </span>
                   </>
+                ) : repoConfig.sourceType === 'github-master' ? (
+                  <>
+                    <Github className="w-3 h-3 text-emerald-400 shrink-0" />
+                    <span className="font-mono truncate max-w-[150px] sm:max-w-[240px] text-slate-300">
+                      {(repoConfig.masterGithubUrl || repoConfig.directoryPath || 'mastersongbook').replace('https://github.com/', '')}
+                    </span>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 rounded font-sans font-semibold">
+                      Master GitHub (Cloud Overwrite)
+                    </span>
+                  </>
                 ) : repoConfig.sourceType === 'github-url' || (repoConfig.directoryPath && repoConfig.directoryPath.includes('github.com')) ? (
                   <>
                     <Github className="w-3 h-3 text-sky-400 shrink-0" />
                     <span className="font-mono truncate max-w-[150px] sm:max-w-[240px] text-slate-300">
-                      {repoConfig.directoryPath || 'GitHub'}
+                      {(repoConfig.githubUrl || repoConfig.directoryPath || 'GitHub').replace('https://github.com/', '')}
                     </span>
                     <span className="text-[9px] px-1.5 py-0.5 bg-sky-500/15 border border-sky-500/30 text-sky-300 rounded font-sans font-semibold">
-                      GitHub (Read-Only)
+                      Shared GitHub (Read-Only)
                     </span>
                   </>
                 ) : (
@@ -409,16 +419,11 @@ export const SongList: React.FC<SongListProps> = ({
                   </div>
                 </div>
 
-                {/* Right: Key, Tempo, Quick Edit & Chevron */}
+                {/* Right: Key, Quick Edit & Chevron */}
                 <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                   {song.key && (
                     <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 text-sky-300 rounded-md text-[11px] font-mono font-semibold">
                       Key {song.key}
-                    </span>
-                  )}
-                  {song.tempo && (
-                    <span className="hidden sm:inline-block px-2 py-0.5 bg-slate-950 border border-slate-800 text-amber-300 rounded-md text-[11px] font-mono">
-                      {song.tempo} BPM
                     </span>
                   )}
 

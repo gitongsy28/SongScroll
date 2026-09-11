@@ -1,6 +1,7 @@
 import { RepositoryConfig, RepositorySourceType, Song, ViewerSettings } from '../types';
-import { createSongFromChordPro, deduplicateSongs } from './chordpro';
+import { createSongFromChordPro, deduplicateSongs, parseChordPro } from './chordpro';
 import { getInitialSongs } from './sampleSongs';
+import { commitSongFileToGitHub } from './githubSync';
 
 const DB_NAME = 'chordpro_reader_db';
 const DB_VERSION = 1;
@@ -249,6 +250,18 @@ export async function loadAllSongs(): Promise<Song[]> {
       req.onsuccess = async () => {
         const results = req.result as Song[];
         if (results && results.length > 0) {
+          results.forEach((s) => {
+            if (s.rawChordPro) {
+              const p = s.parsed || parseChordPro(s.rawChordPro);
+              if (s.scrollSpeed === undefined && p.scrollSpeed) {
+                s.scrollSpeed = p.scrollSpeed;
+              }
+              if (p.backtracks && p.backtracks.length > 0) {
+                s.backtracks = p.backtracks;
+              }
+              s.parsed = p;
+            }
+          });
           const deduped = deduplicateSongs(results);
           // If duplicates were detected in IndexedDB from previous runs, clean the store immediately
           if (deduped.length !== results.length) {
@@ -294,7 +307,9 @@ export async function saveSong(song: Song): Promise<void> {
 export interface SaveSongResult {
   success: boolean;
   diskUpdated: boolean;
+  remoteUpdated?: boolean;
   fileName: string;
+  commitUrl?: string;
   message: string;
 }
 
@@ -461,7 +476,51 @@ export async function saveSongWithDiskOverwrite(
 
   const targetFileName = song.fileName || `${song.artist ? `${song.artist} - ` : ''}${song.title || 'Untitled'}.cho`;
 
-  // 2. Rule: In 'github-url' or 'bundled' mode, physical source files are NOT updated
+  // 2. Master Repository: Two-Way Write Support
+  // 2A. GitHub Master Repository ('github-master'): commit and overwrite directly on GitHub via GitHub API
+  if (currentSource === 'github-master') {
+    const masterUrl = (repoConfig.masterGithubUrl || repoConfig.githubUrl || repoConfig.directoryPath || '').trim() || 'https://github.com/gitongsy28/mastersongbook';
+    const masterToken = (repoConfig.masterGithubToken || repoConfig.githubToken || '').trim();
+
+    if (!masterToken) {
+      return {
+        success: true,
+        diskUpdated: false,
+        remoteUpdated: false,
+        fileName: targetFileName,
+        message: `Saved to app database! To overwrite the file in Master GitHub (${masterUrl}), please enter your GitHub Personal Access Token with write permission in Repo Source.`,
+      };
+    }
+
+    const commitRes = await commitSongFileToGitHub({
+      repoUrl: masterUrl,
+      token: masterToken,
+      fileName: targetFileName,
+      fileContent: song.rawChordPro,
+      commitMessage: `Update ${song.title} by ${song.artist} via SongScroll Master Repo`,
+    });
+
+    if (commitRes.committed) {
+      return {
+        success: true,
+        diskUpdated: true,
+        remoteUpdated: true,
+        fileName: targetFileName,
+        commitUrl: commitRes.commitUrl,
+        message: `Success! Overwrote "${targetFileName}" in Master GitHub repository (${masterUrl}) and updated app database.`,
+      };
+    } else {
+      return {
+        success: true,
+        diskUpdated: false,
+        remoteUpdated: false,
+        fileName: targetFileName,
+        message: `Saved to app database. Could not commit to Master GitHub: ${commitRes.message}`,
+      };
+    }
+  }
+
+  // 2B. Read-only repositories ('github-url' or 'bundled'): physical source files are NOT updated
   if (currentSource !== 'local-drive') {
     const repoLabel = currentSource === 'github-url' ? 'GitHub Shared Repository' : 'Bundled SongBook (/public/SongBook/)';
     return {
@@ -472,7 +531,7 @@ export async function saveSongWithDiskOverwrite(
     };
   }
 
-  // 3. In Master Repository ('local-drive'): attempt to overwrite physical file on disk
+  // 3. In Local Master Repository ('local-drive'): attempt to overwrite physical file on disk
   let dirHandle = getDirectoryHandle();
   if (!dirHandle) {
     dirHandle = await restoreActiveDirectoryHandle();
@@ -641,6 +700,7 @@ export function loadRepositoryConfig(): RepositoryConfig {
       const inferredSource: RepositorySourceType = 
         parsed.sourceType || 
         (parsed.directoryPath?.includes('/public/SongBook') || parsed.directoryPath === '/SongBook/' ? 'bundled' : 
+         parsed.directoryPath?.includes('mastersongbook') || parsed.masterGithubUrl?.includes('mastersongbook') ? 'github-master' :
          parsed.directoryPath?.includes('github.com') ? 'github-url' : 'local-drive');
 
       return {

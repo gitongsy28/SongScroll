@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Edit3, Plus, Save, X, Eye, FileText, Check, Music, HardDrive, Github, Folder, AlertCircle, Download, FolderOpen, ExternalLink } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Edit3, Plus, Save, X, Eye, FileText, Check, Music, HardDrive, Github, Folder, AlertCircle, Download, FolderOpen, ExternalLink, Sparkles, Timer } from 'lucide-react';
 import { RepositoryConfig, Song } from '../types';
-import { createSongFromChordPro, parseChordPro } from '../utils/chordpro';
+import { createSongFromChordPro, parseChordPro, reformatChordPro } from '../utils/chordpro';
 import { 
   isMasterFolderConnected, 
   getConnectedFolderName, 
@@ -53,6 +53,9 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
   const [folderConnected, setFolderConnected] = useState(isMasterFolderConnected());
   const [connectedName, setConnectedName] = useState<string | null>(getConnectedFolderName());
   const [isConnecting, setIsConnecting] = useState(false);
+  const [cursorSelection, setCursorSelection] = useState<{ start: number; end: number } | null>(null);
+  const [beautifiedToast, setBeautifiedToast] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const isIframe = typeof window !== 'undefined' && window.self !== window.top;
 
@@ -62,6 +65,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
     } else {
       setContent(TEMPLATE_CHORDPRO);
     }
+    setCursorSelection(null);
   }, [songToEdit, isOpen]);
 
   useEffect(() => {
@@ -82,9 +86,13 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
 
   const parsed = parseChordPro(content);
 
-  const isMasterRepo = !repoConfig || repoConfig.sourceType === 'local-drive';
+  const isMasterLocalRepo = !repoConfig || repoConfig.sourceType === 'local-drive';
+  const isMasterGithubRepo = repoConfig?.sourceType === 'github-master';
   const isGithubRepo = repoConfig?.sourceType === 'github-url';
   const isBundledRepo = repoConfig?.sourceType === 'bundled';
+
+  const masterGithubUrl = repoConfig?.masterGithubUrl || repoConfig?.githubUrl || (repoConfig?.directoryPath?.includes('github.com') ? repoConfig.directoryPath : 'https://github.com/gitongsy28/mastersongbook');
+  const hasMasterToken = !!(repoConfig?.masterGithubToken || repoConfig?.githubToken);
 
   const targetFileName = songToEdit?.fileName || `${parsed.artist || 'Artist'} - ${parsed.title || 'Untitled'}.cho`;
 
@@ -141,7 +149,37 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
   };
 
   const handleInsertDirective = (snippet: string) => {
-    setContent((prev) => prev + (prev.endsWith('\n') ? '' : '\n') + snippet + '\n');
+    // If the cursor position is not yet determined (user did not click in the file yet),
+    // append the new Quick Insert at the bottom of the file (like current app behaviour).
+    if (cursorSelection === null) {
+      setContent((prev) => prev + (prev.endsWith('\n') ? '' : '\n') + snippet + '\n');
+      return;
+    }
+
+    // However, if the cursor position in the file has already been determined,
+    // insert the new Quick-Insert text in a new row at the position of the cursor.
+    const { start, end } = cursorSelection;
+    const before = content.slice(0, start);
+    const after = content.slice(end);
+
+    const prefix = start > 0 && !before.endsWith('\n') ? '\n' : '';
+    const suffix = after.length > 0 && !after.startsWith('\n') ? '\n' : (after.length === 0 ? '\n' : '');
+
+    const inserted = prefix + snippet + suffix;
+    const newContent = before + inserted + after;
+    setContent(newContent);
+
+    // Update cursor position to right after the newly inserted snippet
+    const newCursorPos = before.length + prefix.length + snippet.length;
+    setCursorSelection({ start: newCursorPos, end: newCursorPos });
+
+    // Focus textarea and sync selection range
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 0);
   };
 
   const handleSave = () => {
@@ -171,6 +209,13 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
     onClose();
   };
 
+  const handleBeautify = () => {
+    const beautified = reformatChordPro(content);
+    setContent(beautified);
+    setBeautifiedToast(true);
+    setTimeout(() => setBeautifiedToast(false), 2500);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150">
       <div 
@@ -194,6 +239,21 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              id="beautify-cho-btn"
+              type="button"
+              onClick={handleBeautify}
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors border ${
+                beautifiedToast
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 font-bold'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700'
+              }`}
+              title="Reformat & Beautify directives according to standard ordering list, leaving song layout intact"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${beautifiedToast ? 'text-slate-950 animate-spin' : 'text-amber-400'}`} />
+              <span>{beautifiedToast ? 'Beautified!' : 'Beautify'}</span>
+            </button>
+
             <button
               id="download-cho-btn"
               type="button"
@@ -241,7 +301,30 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
         </div>
 
         {/* Repository Save Mode Banner */}
-        {isMasterRepo ? (
+        {isMasterGithubRepo ? (
+          <div className="px-5 py-2.5 bg-emerald-950/60 border-b border-emerald-500/40 text-[11px] text-emerald-200 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 truncate">
+              <span className="flex h-2 w-2 relative shrink-0">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <Github className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+              <div className="truncate">
+                <span className="font-bold text-emerald-300">Master GitHub Repository ({masterGithubUrl.replace('https://github.com/', '')}): </span>
+                Clicking <span className="font-semibold text-white">Save Song</span> will commit and overwrite{' '}
+                <code className="bg-slate-900 px-1.5 py-0.5 rounded text-amber-300 font-mono text-[10px] font-bold">
+                  {targetFileName}
+                </code>{' '}
+                directly in your Master GitHub repository!
+              </div>
+            </div>
+            {!hasMasterToken && (
+              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded text-[10px] font-semibold shrink-0">
+                ⚠️ Write Token Needed in Repo Source
+              </span>
+            )}
+          </div>
+        ) : isMasterLocalRepo ? (
           folderConnected ? (
             <div className="px-5 py-2.5 bg-emerald-950/50 border-b border-emerald-500/40 text-[11px] text-emerald-200 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 truncate">
@@ -313,7 +396,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             <Github className="w-3.5 h-3.5 text-sky-400 shrink-0" />
             <div className="flex-1 truncate">
               <span className="font-bold text-sky-300">GitHub Shared Repository (Read-Only): </span>
-              Saving updates your local app database immediately. The source file on GitHub is not modified.
+              Saving updates your local app database immediately. The source file on GitHub is not modified (Bandmate mode).
             </div>
           </div>
         ) : (
@@ -334,6 +417,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </span>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{title: Title}')}
               className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono shrink-0"
             >
@@ -341,6 +425,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{artist: Artist}')}
               className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono shrink-0"
             >
@@ -348,6 +433,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{era: 90s}')}
               className="px-2 py-1 bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 rounded font-mono shrink-0"
             >
@@ -355,6 +441,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{key: G}')}
               className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono shrink-0"
             >
@@ -362,6 +449,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{tempo: 120}')}
               className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono shrink-0"
             >
@@ -369,6 +457,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{capo: 2}')}
               className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono shrink-0"
             >
@@ -376,6 +465,43 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertDirective('{meta: ScrollSpeed 15}')}
+              className="px-2 py-1 bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 rounded font-mono shrink-0"
+              title="Set default auto-scroll speed in px/s"
+            >
+              {'{ScrollSpeed}'}
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertDirective('{meta: ScrollPauseSec : 8}')}
+              className="px-2 py-1 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 rounded font-mono shrink-0 font-semibold"
+              title="Pause scroll for N seconds (at 2/3 window height) for guitar lead/solo"
+            >
+              {'{ScrollPauseSec : 8}'}
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertDirective('{meta: BackTrack1 : BackTrack No Vocal : https://www.youtube.com/watch?v= : }\n{meta: BackTrack2 : BackTrack With Vocal : https://www.youtube.com/watch?v= : }\n{meta: BackTrack3 : Guitar Tutorial : https://www.youtube.com/watch?v= : }\n{meta: BackTrack4 : Audio Accompaniment : https:// : }\n{meta: BackTrack5 : BackTrack Local File : D:\\Music\\ : }')}
+              className="px-2 py-1 bg-purple-500/25 text-purple-200 hover:bg-purple-500/35 border border-purple-500/40 rounded font-mono shrink-0 font-semibold"
+              title="Insert 5 BackTrack template lines (BackTrack 1 to 5)"
+            >
+              {'{BackTrack (1-5)}'}
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertDirective('{meta: BackTrack1 : BackTrack Description : https://www.youtube.com/watch?v= : }')}
+              className="px-2 py-1 bg-purple-500/15 text-purple-300 hover:bg-purple-500/25 rounded font-mono shrink-0"
+              title="Insert single BackTrack metadata line"
+            >
+              {'{BackTrack1}'}
+            </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{comment: Verse}')}
               className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300/90 rounded font-mono shrink-0"
             >
@@ -383,6 +509,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('{start_of_chorus}\n[G]Chorus line\n{end_of_chorus}')}
               className="px-2 py-1 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 rounded font-mono shrink-0"
             >
@@ -390,6 +517,7 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             </button>
             <button
               type="button"
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleInsertDirective('[G]')}
               className="px-2 py-1 bg-sky-500/20 text-sky-300 hover:bg-sky-500/30 rounded font-mono shrink-0"
             >
@@ -402,9 +530,34 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
         <div className="flex-1 overflow-hidden">
           {!previewMode ? (
             <textarea
+              ref={textareaRef}
               id="chordpro-raw-textarea"
               value={content}
-              onChange={(e) => setContent(e.target.value)}
+              onChange={(e) => {
+                setContent(e.target.value);
+                setCursorSelection({
+                  start: e.target.selectionStart,
+                  end: e.target.selectionEnd,
+                });
+              }}
+              onClick={(e) => {
+                setCursorSelection({
+                  start: e.currentTarget.selectionStart,
+                  end: e.currentTarget.selectionEnd,
+                });
+              }}
+              onKeyUp={(e) => {
+                setCursorSelection({
+                  start: e.currentTarget.selectionStart,
+                  end: e.currentTarget.selectionEnd,
+                });
+              }}
+              onSelect={(e) => {
+                setCursorSelection({
+                  start: e.currentTarget.selectionStart,
+                  end: e.currentTarget.selectionEnd,
+                });
+              }}
               placeholder="Enter ChordPro text format here..."
               className="w-full h-full p-5 bg-slate-950 font-mono-chord text-xs sm:text-sm text-slate-200 resize-none focus:outline-none focus:ring-0 leading-relaxed selection:bg-amber-500/30"
               spellCheck={false}

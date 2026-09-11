@@ -1,6 +1,6 @@
 {
   "name": "Remix SongScroll",
-  "description": "SongScroll music lyrics and chord player with auto-scroll, half-step transposition, top-right animated metronome, and local drive repository directory support.",
+  "description": "SongScroll music lyrics and chord player with auto-scroll, 3 display modes (Summary, Normal, Detailed), interactive guitar chord grids builder, ScrollPause in seconds, half-step transposition, and source ChordPro beautifier.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

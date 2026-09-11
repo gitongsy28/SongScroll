@@ -1698,3 +1698,188 @@ export function strumGuitarChord(frets: number[], downstroke = true): void {
     }, index * 32);
   });
 }
+
+export interface DetectedChordResult {
+  chordName: string;
+  isStandard: boolean;
+  isAltered: boolean;
+  root: string;
+  bass?: string;
+  notes: string[];
+  intervals: string[];
+}
+
+interface FormulaEntry {
+  quality: string;
+  intervals: number[];
+}
+
+const CHORD_FORMULAS: FormulaEntry[] = [
+  // Triads
+  { quality: '', intervals: [0, 4, 7] }, // Major
+  { quality: 'm', intervals: [0, 3, 7] }, // Minor
+  { quality: 'sus4', intervals: [0, 5, 7] },
+  { quality: 'sus2', intervals: [0, 2, 7] },
+  { quality: 'dim', intervals: [0, 3, 6] },
+  { quality: 'aug', intervals: [0, 4, 8] },
+  { quality: '5', intervals: [0, 7] },
+  // 7ths & shells
+  { quality: '7', intervals: [0, 4, 7, 10] },
+  { quality: '7', intervals: [0, 4, 10] },
+  { quality: 'maj7', intervals: [0, 4, 7, 11] },
+  { quality: 'maj7', intervals: [0, 4, 11] },
+  { quality: 'm7', intervals: [0, 3, 7, 10] },
+  { quality: 'm7', intervals: [0, 3, 10] },
+  { quality: '7sus4', intervals: [0, 5, 7, 10] },
+  { quality: '7sus4', intervals: [0, 5, 10] },
+  { quality: 'dim7', intervals: [0, 3, 6, 9] },
+  { quality: 'm7b5', intervals: [0, 3, 6, 10] },
+  { quality: 'mMaj7', intervals: [0, 3, 7, 11] },
+  // 6ths & 9ths
+  { quality: '6', intervals: [0, 4, 7, 9] },
+  { quality: 'm6', intervals: [0, 3, 7, 9] },
+  { quality: '9', intervals: [0, 4, 7, 10, 2] },
+  { quality: '9', intervals: [0, 4, 10, 2] },
+  { quality: 'add9', intervals: [0, 4, 7, 2] },
+  { quality: 'm9', intervals: [0, 3, 7, 10, 2] },
+  { quality: 'maj9', intervals: [0, 4, 7, 11, 2] },
+];
+
+/**
+ * Automatically detects the chord name from any arbitrary 6-string fret fingering.
+ * Identifies standard chords, inversions (slash chords), and altered chords.
+ * Non-standard / altered shapes are prefixed with '*' (e.g. *G7) and duplicates
+ * with different frets are disambiguated with additional asterisks (**G7).
+ */
+export function detectChordFromVoicing(
+  frets: number[],
+  baseFret: number = 1,
+  existingCustomChords?: Record<string, ChordVoicing>,
+  fallbackChordName?: string
+): DetectedChordResult {
+  const playedNotes: { stringIdx: number; fret: number; semitone: number; name: string }[] = [];
+
+  for (let s = 0; s < 6; s++) {
+    const f = frets[s];
+    if (f >= 0) {
+      const semitone = (STRING_BASE_SEMITONES[s] + f) % 12;
+      const name = CHROMATIC_NOTES_SHARP[semitone];
+      playedNotes.push({ stringIdx: s, fret: f, semitone, name });
+    }
+  }
+
+  if (playedNotes.length === 0) {
+    return {
+      chordName: 'Muted',
+      isStandard: false,
+      isAltered: false,
+      root: '',
+      notes: [],
+      intervals: [],
+    };
+  }
+
+  // Bass note is the note on the lowest string (lowest stringIdx)
+  const bassNoteObj = playedNotes[0];
+  const bassPitch = bassNoteObj.semitone;
+  const bassName = bassNoteObj.name;
+
+  // Unique pitches in chord
+  const uniquePitches = Array.from(new Set(playedNotes.map(n => n.semitone)));
+  const uniqueNames = Array.from(new Set(playedNotes.map(n => n.name)));
+
+  // 1. Test for exact match with standard chord formulas
+  // Test roots: start with bass note, then test other notes
+  const candidateRoots = [bassPitch, ...uniquePitches.filter(p => p !== bassPitch)];
+
+  for (const root of candidateRoots) {
+    const relativeIntervals = uniquePitches.map(p => (p - root + 12) % 12).sort((a, b) => a - b);
+    const intervalSet = new Set(relativeIntervals);
+
+    for (const formula of CHORD_FORMULAS) {
+      const formulaSet = new Set(formula.intervals);
+      if (
+        intervalSet.size === formulaSet.size &&
+        Array.from(intervalSet).every(i => formulaSet.has(i))
+      ) {
+        const rootName = CHROMATIC_NOTES_SHARP[root];
+        const slash = (bassPitch !== root) ? `/${bassName}` : '';
+        const chordName = `${rootName}${formula.quality}${slash}`;
+        return {
+          chordName,
+          isStandard: true,
+          isAltered: false,
+          root: rootName,
+          bass: bassPitch !== root ? bassName : undefined,
+          notes: uniqueNames,
+          intervals: Array.from(intervalSet).map(String),
+        };
+      }
+    }
+  }
+
+  // 2. No exact standard match found: Altered / non-standard chord
+  // Find the closest matching root and quality
+  let bestRoot = bassPitch;
+  let bestQuality = '7';
+  let maxScore = -1;
+
+  // If a fallback chord name was supplied, prioritize its root
+  let fallbackRootPitch: number | undefined;
+  if (fallbackChordName) {
+    const parsedFallback = parseChordName(fallbackChordName.replace(/^\*+/, ''));
+    if (parsedFallback.root && NOTE_SEMITONE_MAP[parsedFallback.root] !== undefined) {
+      fallbackRootPitch = NOTE_SEMITONE_MAP[parsedFallback.root];
+    }
+  }
+
+  const rootsToScore = fallbackRootPitch !== undefined 
+    ? [fallbackRootPitch, ...candidateRoots.filter(r => r !== fallbackRootPitch)]
+    : candidateRoots;
+
+  for (const root of rootsToScore) {
+    const relativeIntervals = new Set(uniquePitches.map(p => (p - root + 12) % 12));
+    for (const formula of CHORD_FORMULAS) {
+      let score = 0;
+      for (const i of formula.intervals) {
+        if (relativeIntervals.has(i)) score++;
+      }
+      if (root === bassPitch) score += 0.5;
+      if (fallbackRootPitch !== undefined && root === fallbackRootPitch) score += 1.0;
+
+      if (score > maxScore) {
+        maxScore = score;
+        bestRoot = root;
+        bestQuality = formula.quality;
+      }
+    }
+  }
+
+  const rootName = CHROMATIC_NOTES_SHARP[bestRoot];
+  const baseAlteredName = `*${rootName}${bestQuality}`;
+
+  // Check for chord name duplication in existing custom chords
+  let resolvedChordName = baseAlteredName;
+  if (existingCustomChords) {
+    let asteriskPrefix = '*';
+    const fretsKey = frets.join(',');
+
+    while (
+      existingCustomChords[resolvedChordName] &&
+      existingCustomChords[resolvedChordName].frets.join(',') !== fretsKey
+    ) {
+      asteriskPrefix += '*';
+      resolvedChordName = `${asteriskPrefix}${rootName}${bestQuality}`;
+    }
+  }
+
+  return {
+    chordName: resolvedChordName,
+    isStandard: false,
+    isAltered: true,
+    root: rootName,
+    bass: bassPitch !== bestRoot ? bassName : undefined,
+    notes: uniqueNames,
+    intervals: uniquePitches.map(p => (p - bestRoot + 12) % 12).map(String),
+  };
+}

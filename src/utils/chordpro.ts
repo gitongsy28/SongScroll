@@ -1,4 +1,5 @@
-import { ChordProLine, ChordSegment, ParsedChordPro, Song } from '../types';
+import { BackTrackItem, BackTrackType, ChordProLine, ChordSegment, ParsedChordPro, Song } from '../types';
+import { ChordVoicing } from './guitarChords';
 
 // Chromatic scales
 const SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
@@ -57,12 +58,22 @@ export function transposeNote(note: string, semitones: number, preferSharps?: bo
 const CHORD_REGEX = /^([A-Ga-g])([#b]?)([^/]*)(?:\/([A-Ga-g][#b]?))?$/;
 
 /**
- * Transposes a full chord name (e.g. "Am7", "F#/A#", "Gadd9", "C#m7b5")
+ * Transposes a full chord name (e.g. "Am7", "F#/A#", "Gadd9", "C#m7b5", "*G7", "**C")
  */
 export function transposeChord(chord: string, semitones: number, preferSharps?: boolean): string {
   if (!chord || semitones === 0) return chord;
 
-  const match = chord.trim().match(CHORD_REGEX);
+  const trimmed = chord.trim();
+  // Extract leading or trailing asterisks used for altered/custom chords
+  const prefixMatch = trimmed.match(/^(\*+)(.*)$/);
+  const prefixAsterisks = prefixMatch ? prefixMatch[1] : '';
+  const withoutPrefix = prefixMatch ? prefixMatch[2] : trimmed;
+
+  const suffixMatch = withoutPrefix.match(/^(.*?)(\*+)$/);
+  const suffixAsterisks = suffixMatch ? suffixMatch[2] : '';
+  const coreChord = suffixMatch ? suffixMatch[1] : withoutPrefix;
+
+  const match = coreChord.match(CHORD_REGEX);
   if (!match) return chord;
 
   const [, rootLetter, accidental, suffix, slashBass] = match;
@@ -75,7 +86,7 @@ export function transposeChord(chord: string, semitones: number, preferSharps?: 
     transposedBass = '/' + transposeNote(slashBass, semitones, preferSharps);
   }
 
-  return `${transposedRoot}${suffix}${transposedBass}`;
+  return `${prefixAsterisks}${transposedRoot}${suffix}${transposedBass}${suffixAsterisks}`;
 }
 
 /**
@@ -95,14 +106,18 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
   let timeSignature = '4/4';
   let capo: number | undefined;
   let duration = '';
+  let scrollSpeed: number | undefined;
+  const backtracksMap = new Map<number, BackTrackItem>();
+  const customChordsMap: Record<string, ChordVoicing> = {};
   let inTab = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const prevParsedCount = parsedLines.length;
     const trimmed = line.trim();
 
     if (!trimmed) {
-      parsedLines.push({ type: 'empty', raw: line });
+      parsedLines.push({ type: 'empty', raw: line, sourceLineIndex: i });
       continue;
     }
 
@@ -165,6 +180,74 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
         case 'duration':
           duration = value;
           break;
+        case 'meta': {
+          // ChordPro meta directive: {meta: key value} e.g. {meta: ScrollSpeed 15}
+          const match = value.match(/^([a-zA-Z0-9_-]+)(?:[\s:=]+(.*))?$/);
+          if (match) {
+            const metaKey = match[1].trim();
+            const metaVal = (match[2] || '').trim();
+            metadata[metaKey] = metaVal;
+            const normKey = metaKey.toLowerCase();
+            if (normKey === 'scrollspeed' || normKey === 'scroll_speed' || normKey === 'speed') {
+              const num = parseFloat(metaVal);
+              if (!isNaN(num) && num > 0) {
+                scrollSpeed = num;
+              }
+            } else if (/^backtrack([1-5])$/.test(normKey)) {
+              const bt = parseBackTrackEntry(metaKey, metaVal, line);
+              if (bt) {
+                backtracksMap.set(bt.index, bt);
+              }
+            } else if (normKey === 'scrollpausesec' || normKey === 'scroll_pause_sec' || normKey === 'scrollpause') {
+              const pauseNum = parseFloat(metaVal.replace(/^[:\s=]+/, ''));
+              parsedLines.push({
+                type: 'scroll_pause',
+                pauseSeconds: !isNaN(pauseNum) && pauseNum > 0 ? pauseNum : 5,
+                raw: line,
+              });
+            }
+          }
+          break;
+        }
+        case 'scrollpausesec':
+        case 'scroll_pause_sec':
+        case 'scrollpause': {
+          const pauseNum = parseFloat(value.replace(/^[:\s=]+/, ''));
+          parsedLines.push({
+            type: 'scroll_pause',
+            pauseSeconds: !isNaN(pauseNum) && pauseNum > 0 ? pauseNum : 5,
+            raw: line,
+          });
+          break;
+        }
+        case 'define':
+        case 'd': {
+          const customVoicing = parseChordDefineDirective(value);
+          if (customVoicing) {
+            customChordsMap[customVoicing.name] = customVoicing.voicing;
+          }
+          parsedLines.push({ type: 'define', text: value, raw: line });
+          break;
+        }
+        case 'backtrack1':
+        case 'backtrack2':
+        case 'backtrack3':
+        case 'backtrack4':
+        case 'backtrack5': {
+          const bt = parseBackTrackEntry(directive, value, line);
+          if (bt) {
+            backtracksMap.set(bt.index, bt);
+          }
+          break;
+        }
+        case 'scrollspeed':
+        case 'scroll_speed': {
+          const num = parseFloat(value);
+          if (!isNaN(num) && num > 0) {
+            scrollSpeed = num;
+          }
+          break;
+        }
         case 'comment':
         case 'c':
         case 'ci':
@@ -259,6 +342,10 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
       segments,
       raw: line,
     });
+
+    for (let k = prevParsedCount; k < parsedLines.length; k++) {
+      parsedLines[k].sourceLineIndex = i;
+    }
   }
 
   // Attempt to infer key from first chord if not specified
@@ -284,6 +371,8 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
     tempo = 100;
   }
 
+  const backtracks = Array.from(backtracksMap.values()).sort((a, b) => a.index - b.index);
+
   return {
     title,
     artist,
@@ -294,8 +383,11 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
     timeSignature,
     capo,
     duration,
+    scrollSpeed,
     lines: parsedLines,
     metadata,
+    backtracks,
+    customChords: Object.keys(customChordsMap).length > 0 ? customChordsMap : undefined,
     raw: chordProText,
   };
 }
@@ -320,6 +412,7 @@ export function serializeChordPro(parsed: ParsedChordPro, transposeSemitones: nu
   if (parsed.timeSignature) result.push(`{time: ${parsed.timeSignature}}`);
   if (parsed.capo) result.push(`{capo: ${parsed.capo}}`);
   if (parsed.duration) result.push(`{duration: ${parsed.duration}}`);
+  if (parsed.scrollSpeed) result.push(`{meta: ScrollSpeed ${parsed.scrollSpeed}}`);
   result.push('');
 
   for (const line of parsed.lines) {
@@ -413,6 +506,58 @@ export function deduplicateSongs(songs: Song[]): Song[] {
 }
 
 /**
+ * Updates or adds the {meta: ScrollSpeed <speed>} directive in a ChordPro raw string.
+ * Preserves existing directives, chords, lyrics, comments, and structure.
+ */
+export function updateChordProScrollSpeed(rawChordPro: string, newSpeed: number): string {
+  const metaRegex = /\{meta:\s*scrollspeed\b[^}]*\}/i;
+  const directRegex = /\{scrollspeed\b[^}]*\}/i;
+
+  if (metaRegex.test(rawChordPro)) {
+    return rawChordPro.replace(metaRegex, `{meta: ScrollSpeed ${newSpeed}}`);
+  }
+  if (directRegex.test(rawChordPro)) {
+    return rawChordPro.replace(directRegex, `{meta: ScrollSpeed ${newSpeed}}`);
+  }
+
+  // If not present, locate header section to insert directive cleanly
+  const lines = rawChordPro.split(/\r?\n/);
+  let insertIndex = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim().toLowerCase();
+    if (
+      trimmed.startsWith('{title') ||
+      trimmed.startsWith('{t:') ||
+      trimmed.startsWith('{artist') ||
+      trimmed.startsWith('{a:') ||
+      trimmed.startsWith('{subtitle') ||
+      trimmed.startsWith('{st:') ||
+      trimmed.startsWith('{key') ||
+      trimmed.startsWith('{k:') ||
+      trimmed.startsWith('{tempo') ||
+      trimmed.startsWith('{bpm') ||
+      trimmed.startsWith('{time') ||
+      trimmed.startsWith('{capo') ||
+      trimmed.startsWith('{duration') ||
+      trimmed.startsWith('{era') ||
+      trimmed.startsWith('{meta')
+    ) {
+      insertIndex = i;
+    } else if (trimmed && !trimmed.startsWith('{') && insertIndex >= 0) {
+      break;
+    }
+  }
+
+  if (insertIndex >= 0) {
+    lines.splice(insertIndex + 1, 0, `{meta: ScrollSpeed ${newSpeed}}`);
+    return lines.join('\n');
+  }
+
+  return `{meta: ScrollSpeed ${newSpeed}}\n${rawChordPro}`;
+}
+
+/**
  * Creates a Song object from raw ChordPro text
  */
 export function createSongFromChordPro(rawText: string, filePath?: string, fileName?: string, explicitId?: string): Song {
@@ -433,6 +578,8 @@ export function createSongFromChordPro(rawText: string, filePath?: string, fileN
     timeSignature: parsed.timeSignature,
     capo: parsed.capo,
     duration: parsed.duration,
+    scrollSpeed: parsed.scrollSpeed,
+    backtracks: parsed.backtracks,
     rawChordPro: rawText,
     parsed,
     filePath: filePath || '',
@@ -696,3 +843,523 @@ export function generateSummaryLines(lines: ChordProLine[]): ChordProLine[] {
   return result;
 }
 
+/**
+ * Parses a BackTrack metadata entry (e.g. key="BackTrack1", value="Babe BackTrack No Vocal : https://www.youtube.com/watch?v=sBRkqQhUERY : ")
+ */
+export function parseBackTrackEntry(key: string, value: string, rawLine?: string): BackTrackItem | null {
+  const keyMatch = key.match(/^backtrack([1-5])$/i);
+  if (!keyMatch) return null;
+  const index = parseInt(keyMatch[1], 10);
+
+  let content = (value || '').trim();
+  // Strip trailing colon if present (e.g. "... : }")
+  content = content.replace(/:\s*$/, '').trim();
+
+  let description = '';
+  let targetUrl = '';
+
+  // Look for colon separator between description and target URL/path
+  const colonIndex = content.indexOf(':');
+  if (colonIndex !== -1) {
+    const candidateDesc = content.slice(0, colonIndex).trim();
+    const candidateUrl = content.slice(colonIndex + 1).trim();
+
+    // Check if the first part looks like a scheme or drive letter rather than a description
+    if (/^(https?:\/\/|file:\/\/|[a-zA-Z]:[\\/])/i.test(candidateDesc)) {
+      description = `BackTrack ${index}`;
+      targetUrl = content;
+    } else {
+      description = candidateDesc;
+      targetUrl = candidateUrl.replace(/:\s*$/, '').trim();
+    }
+  } else {
+    description = `BackTrack ${index}`;
+    targetUrl = content;
+  }
+
+  const type = detectBackTrackType(targetUrl);
+
+  return {
+    id: `BackTrack${index}`,
+    index,
+    description: description || `BackTrack ${index}`,
+    url: targetUrl,
+    type,
+    rawDirective: rawLine,
+  };
+}
+
+/**
+ * Classifies the type of BackTrack target
+ */
+export function detectBackTrackType(url: string): BackTrackType {
+  const clean = (url || '').trim().toLowerCase();
+  if (clean.includes('youtube.com/') || clean.includes('youtu.be/')) {
+    return 'youtube';
+  }
+  if (clean.includes('github.com/') && (clean.endsWith('.mp3') || clean.endsWith('.wav') || clean.endsWith('.mp4') || clean.endsWith('.m4a') || clean.endsWith('.ogg'))) {
+    return 'github';
+  }
+  if (/^[a-zA-Z]:[/\\]/.test((url || '').trim()) || clean.startsWith('file:///')) {
+    return 'local';
+  }
+  if (clean.endsWith('.mp3') || clean.endsWith('.wav') || clean.endsWith('.ogg') || clean.endsWith('.m4a') || clean.endsWith('.flac') || clean.endsWith('.aac')) {
+    return 'audio-url';
+  }
+  return 'web';
+}
+
+/**
+ * Validates a BackTrack item, filtering out blank, incomplete, or template placeholder entries
+ */
+export function isValidBackTrack(item: BackTrackItem): boolean {
+  if (!item || !item.url) return false;
+  const url = item.url.trim();
+  const desc = item.description.trim();
+
+  // Filter out empty or whitespace
+  if (!url || !desc) return false;
+
+  // Filter out template placeholders
+  if (
+    desc.includes('<Link description>') ||
+    desc.includes('<Description>') ||
+    desc.includes('<Link') ||
+    desc.toLowerCase() === 'description' ||
+    desc.toLowerCase() === '<link description>'
+  ) {
+    return false;
+  }
+
+  if (
+    url.includes('<URL') ||
+    url.includes('<Path') ||
+    url.includes('<Mp3') ||
+    url.includes('<URL/Mp3/Mp4/Wav/etc>')
+  ) {
+    return false;
+  }
+
+  // Filter incomplete URLs
+  if (
+    url === 'https://' ||
+    url === 'http://' ||
+    url === 'https://www.youtube.com/watch?v=' ||
+    url === 'https://youtu.be/'
+  ) {
+    return false;
+  }
+
+  // URL must be either a valid http/https URL, file URL, or valid local drive path
+  if (/^https?:\/\/[^\s$.?#].[^\s]*$/i.test(url)) return true;
+  if (/^file:\/\/\/.+/i.test(url)) return true;
+  if (/^[a-zA-Z]:[/\\][^\0]+$/i.test(url)) return true;
+  if (/^\.?\/[^\0]+\.(mp3|wav|mp4|m4a|ogg|flac|aac|webm)$/i.test(url)) return true;
+  if (/^https?:\/\//i.test(url) && url.length > 10) return true;
+
+  return false;
+}
+
+/**
+ * Extracts YouTube 11-character video ID from various YouTube URL formats
+ */
+export function extractYouTubeId(url: string): string | null {
+  if (!url) return null;
+  const regExp = /(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/i;
+  const match = url.match(regExp);
+  return match ? match[1] : null;
+}
+
+/**
+ * Converts a GitHub blob URL to direct streamable raw URL for HTML5 audio
+ */
+export function getStreamableAudioUrl(url: string): string {
+  if (!url) return '';
+  if (url.includes('github.com') && url.includes('/blob/')) {
+    return url.replace('github.com', 'raw.githubusercontent.com').replace('/blob/', '/');
+  }
+  return url;
+}
+
+/**
+ * Parses a standard ChordPro {define: Name base-fret N frets f1 f2 f3 f4 f5 f6} directive
+ */
+export function parseChordDefineDirective(directiveValue: string): { name: string; voicing: ChordVoicing } | null {
+  const match = directiveValue.trim().match(/^([^\s:]+)\s+base[-_]?fret\s+(\d+)\s+frets\s+([xX0-9\s-]+)/i);
+  if (!match) return null;
+
+  const name = match[1].trim();
+  const baseFret = parseInt(match[2], 10) || 1;
+  const rawFrets = match[3].trim().split(/\s+/);
+
+  if (rawFrets.length < 6) return null;
+
+  const frets = rawFrets.slice(0, 6).map(f => {
+    const clean = f.trim().toLowerCase();
+    if (clean === 'x' || clean === '-1') return -1;
+    const num = parseInt(clean, 10);
+    return isNaN(num) ? -1 : num;
+  });
+
+  return {
+    name,
+    voicing: {
+      frets,
+      fingers: [0, 0, 0, 0, 0, 0],
+      baseFret,
+    },
+  };
+}
+
+/**
+ * Formats a ChordVoicing into a standard ChordPro {define: ...} directive string
+ */
+export function formatChordDefineDirective(name: string, voicing: ChordVoicing): string {
+  const baseFret = voicing.baseFret || 1;
+  const fretsStr = voicing.frets.map(f => (f < 0 ? 'x' : f)).join(' ');
+  return `{define: ${name} base-fret ${baseFret} frets ${fretsStr}}`;
+}
+
+/**
+ * Inserts or updates a {define: ...} directive in raw ChordPro text
+ */
+export function updateChordProDefineDirective(rawText: string, chordName: string, voicing: ChordVoicing): string {
+  const newDirective = formatChordDefineDirective(chordName, voicing);
+  const lines = rawText.split(/\r?\n/);
+  
+  const escapedName = chordName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const defineRegex = new RegExp(`^\\{\\s*(?:define|idefine|d)(?:\\s*:\\s*|\\s+)${escapedName}(?:\\s+|$|[}:])`, 'i');
+  
+  let replaced = false;
+  const newLines = lines.map(line => {
+    if (defineRegex.test(line.trim())) {
+      replaced = true;
+      return newDirective;
+    }
+    return line;
+  });
+
+  if (replaced) {
+    return newLines.join('\n');
+  }
+
+  // Insert after existing define / idefine block
+  let insertIndex = -1;
+  for (let i = 0; i < newLines.length; i++) {
+    const trimmed = newLines[i].trim();
+    if (/^\{\s*(?:define|idefine|d)[\s:]/i.test(trimmed)) {
+      insertIndex = i + 1;
+    }
+  }
+
+  if (insertIndex !== -1) {
+    newLines.splice(insertIndex, 0, newDirective);
+    return newLines.join('\n');
+  }
+
+  // Otherwise, insert before the first non-empty, non-directive line
+  for (let i = 0; i < newLines.length; i++) {
+    const trimmed = newLines[i].trim();
+    if (trimmed && !trimmed.startsWith('{')) {
+      newLines.splice(i, 0, newDirective);
+      return newLines.join('\n');
+    }
+  }
+
+  return `${newDirective}\n${rawText}`;
+}
+
+/**
+ * Re-orders header directives according to the user specification:
+ * 1. {title:}
+ * 2. {artist:}
+ * 3. {key:}
+ * 4. {Year:}
+ * 5. {Era:}
+ * 6. {capo:}
+ * 7. {tempo:}
+ * 8. {time:}
+ * 9. {duration:}
+ * 10. {meta: ScrollSpeed ...}
+ * 11. {comment:...}
+ *     <--- 1 empty row
+ * 12. {meta: BackTrack1...5}
+ *     <--- 1 empty row
+ * 13. {define:...}
+ *     <--- 2 empty rows before actual song starts
+ *
+ * CRITICAL: The song area (lyrics, chords, tabs, section markers, and empty lines)
+ * is kept completely untouched to protect the musician's exact scroll timing.
+ */
+export function reformatChordPro(chordProText: string): string {
+  const lines = chordProText.split(/\r?\n/);
+  
+  // Find where the actual song body begins
+  let songStartIndex = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    
+    const isDirective = trimmed.startsWith('{') && trimmed.endsWith('}');
+    if (!isDirective) {
+      // Lyrics or chord line -> song area starts here!
+      songStartIndex = i;
+      break;
+    }
+    
+    const inner = trimmed.slice(1, -1).trim();
+    const colonIdx = inner.indexOf(':');
+    const directiveKey = (colonIdx !== -1 ? inner.slice(0, colonIdx) : inner).trim().toLowerCase();
+    const directiveVal = colonIdx !== -1 ? inner.slice(colonIdx + 1).trim() : '';
+    
+    // Check if directive is a song section structure
+    if (
+      directiveKey === 'start_of_chorus' || directiveKey === 'soc' ||
+      directiveKey === 'start_of_verse' || directiveKey === 'sov' ||
+      directiveKey === 'start_of_bridge' || directiveKey === 'sob' ||
+      directiveKey === 'start_of_tab' || directiveKey === 'sot' ||
+      directiveKey === 'start_of_grid' || directiveKey === 'sog' ||
+      (directiveKey === 'meta' && /scrollpausesec/i.test(directiveVal)) ||
+      directiveKey === 'scrollpausesec' || directiveKey === 'scroll_pause_sec'
+    ) {
+      songStartIndex = i;
+      break;
+    }
+    
+    if (directiveKey === 'comment' || directiveKey === 'c' || directiveKey === 'ci' || directiveKey === 'cb') {
+      if (/^(verse|chorus|bridge|intro|outro|solo|interlude|instrumental|pre-chorus|riff|hook)/i.test(directiveVal)) {
+        songStartIndex = i;
+        break;
+      }
+    }
+  }
+
+  const rawHeaderLines = lines.slice(0, songStartIndex);
+  const rawSongLines = lines.slice(songStartIndex);
+
+  let title = '';
+  let artist = '';
+  let key = '';
+  let year = '';
+  let era = '';
+  let capo = '';
+  let tempo = '';
+  let time = '';
+  let duration = '';
+  let scrollSpeed = '';
+  const headerComments: string[] = [];
+  const otherHeaderMetas: string[] = [];
+  const backtracksMap = new Map<number, string>();
+  const defines: string[] = [];
+
+  // Helper to extract directive info
+  const parseDirectiveInfo = (trimmedLine: string) => {
+    if (!trimmedLine.startsWith('{') || !trimmedLine.endsWith('}')) return null;
+    const inner = trimmedLine.slice(1, -1).trim();
+    const colonIdx = inner.indexOf(':');
+    let keyName = '';
+    let val = '';
+    if (colonIdx !== -1) {
+      keyName = inner.slice(0, colonIdx).trim().toLowerCase();
+      val = inner.slice(colonIdx + 1).trim();
+    } else {
+      const parts = inner.match(/^([a-zA-Z0-9_-]+)(?:[\s:=]+(.*))?$/);
+      if (parts) {
+        keyName = parts[1].toLowerCase();
+        val = (parts[2] || '').trim();
+      } else {
+        keyName = inner.toLowerCase();
+      }
+    }
+    return { inner, keyName, val, raw: trimmedLine };
+  };
+
+  const processDirective = (trimmedLine: string, isFromHeaderArea: boolean) => {
+    const parsed = parseDirectiveInfo(trimmedLine);
+    if (!parsed) return;
+    const { keyName, val, inner } = parsed;
+
+    if (keyName === 'title' || keyName === 't') {
+      if (!title) title = val;
+    } else if (keyName === 'artist' || keyName === 'a' || keyName === 'subtitle' || keyName === 'st' || keyName === 'sub' || keyName === 'composer') {
+      if (!artist) artist = val;
+    } else if (keyName === 'key' || keyName === 'k') {
+      if (!key) key = val;
+    } else if (keyName === 'year' || (keyName === 'meta' && /^year/i.test(val))) {
+      if (!year) year = val.replace(/^year[\s:=]*/i, '').trim();
+    } else if (keyName === 'era' || keyName === 'decade' || (keyName === 'meta' && /^era/i.test(val))) {
+      if (!era) era = val.replace(/^era[\s:=]*/i, '').trim();
+    } else if (keyName === 'capo') {
+      if (capo === '') capo = val;
+    } else if (keyName === 'tempo' || keyName === 'bpm') {
+      if (!tempo) tempo = val;
+    } else if (keyName === 'time' || keyName === 'timesig') {
+      if (!time) time = val;
+    } else if (keyName === 'duration') {
+      if (!duration) duration = val;
+    } else if (keyName === 'scrollspeed' || keyName === 'scroll_speed' || (keyName === 'meta' && /^scrollspeed/i.test(val))) {
+      if (!scrollSpeed) scrollSpeed = val.replace(/^scrollspeed[\s:=]*/i, '').trim();
+    } else if (keyName === 'comment' || keyName === 'c' || keyName === 'ci' || keyName === 'cb') {
+      if (isFromHeaderArea) {
+        headerComments.push(trimmedLine);
+      }
+    } else if (/^backtrack([1-5])$/i.test(keyName)) {
+      const idx = parseInt(keyName.replace(/backtrack/i, ''), 10);
+      backtracksMap.set(idx, trimmedLine);
+    } else if (keyName === 'meta' && /^backtrack([1-5])/i.test(val)) {
+      const idxMatch = val.match(/^backtrack([1-5])/i);
+      const idx = idxMatch ? parseInt(idxMatch[1], 10) : 1;
+      backtracksMap.set(idx, trimmedLine);
+    } else if (keyName === 'define' || keyName === 'idefine' || keyName === 'd') {
+      const normalizedDefine = trimmedLine.replace(/^\{\s*idefine\s*:/i, '{define:');
+      defines.push(normalizedDefine);
+    } else {
+      otherHeaderMetas.push(trimmedLine);
+    }
+  };
+
+  // Helper to determine if a directive line in the song body is actually a header metadata directive
+  const isHeaderMetadataDirective = (trimmedLine: string): boolean => {
+    const parsed = parseDirectiveInfo(trimmedLine);
+    if (!parsed) return false;
+    const { keyName, val } = parsed;
+
+    // Header metadata keys that must be extracted to the header
+    if (
+      keyName === 'title' || keyName === 't' ||
+      keyName === 'artist' || keyName === 'a' || keyName === 'subtitle' || keyName === 'st' || keyName === 'sub' || keyName === 'composer' ||
+      keyName === 'key' || keyName === 'k' ||
+      keyName === 'year' ||
+      keyName === 'era' || keyName === 'decade' ||
+      keyName === 'capo' ||
+      keyName === 'tempo' || keyName === 'bpm' ||
+      keyName === 'time' || keyName === 'timesig' ||
+      keyName === 'duration' ||
+      keyName === 'scrollspeed' || keyName === 'scroll_speed' ||
+      keyName === 'define' || keyName === 'idefine' || keyName === 'd' ||
+      /^backtrack[1-5]$/i.test(keyName)
+    ) {
+      return true;
+    }
+
+    // Meta directives: check if scrollspeed, year, era, backtrack, etc. (do NOT extract scrollpause!)
+    if (keyName === 'meta') {
+      if (/scrollpausesec|scroll_pause/i.test(val)) {
+        return false; // Stay in song body!
+      }
+      return true; // ScrollSpeed, BackTrack, Era, Year, etc. -> extract to header!
+    }
+
+    return false;
+  };
+
+  for (const line of rawHeaderLines) {
+    processDirective(line.trim(), true);
+  }
+
+  // Scan songLines: extract any header metadata directives (including any at the bottom of the file)
+  const cleanedSongLines: string[] = [];
+  for (const line of rawSongLines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}') && isHeaderMetadataDirective(trimmed)) {
+      processDirective(trimmed, false);
+      continue;
+    }
+    cleanedSongLines.push(line);
+  }
+
+  // Trim leading blank lines from cleanedSongLines
+  while (cleanedSongLines.length > 0 && !cleanedSongLines[0].trim()) {
+    cleanedSongLines.shift();
+  }
+
+  // Trim trailing blank lines from cleanedSongLines (so removing bottom metadata doesn't leave trailing blank rows)
+  while (cleanedSongLines.length > 0 && !cleanedSongLines[cleanedSongLines.length - 1].trim()) {
+    cleanedSongLines.pop();
+  }
+
+  // Group 1: Standard Meta
+  const group1: string[] = [];
+  if (title) group1.push(`{title: ${title}}`);
+  if (artist) group1.push(`{artist: ${artist}}`);
+  if (key) group1.push(`{key: ${key}}`);
+  if (year) group1.push(`{Year: ${year}}`);
+  if (era) group1.push(`{Era: ${era}}`);
+  if (capo !== '') group1.push(`{capo: ${capo}}`);
+  if (tempo) group1.push(`{tempo: ${tempo}}`);
+  if (time) group1.push(`{time: ${time}}`);
+  if (duration) group1.push(`{duration: ${duration}}`);
+  if (scrollSpeed) group1.push(`{meta: ScrollSpeed : ${scrollSpeed}}`);
+  for (const c of headerComments) group1.push(c);
+  for (const om of otherHeaderMetas) group1.push(om);
+
+  // Group 2: Backtracks 1..5 in order
+  const group2: string[] = [];
+  for (let b = 1; b <= 5; b++) {
+    if (backtracksMap.has(b)) {
+      group2.push(backtracksMap.get(b)!);
+    }
+  }
+
+  // Group 3: defines (deduplicated)
+  const uniqueDefines = Array.from(new Set(defines));
+  const group3 = uniqueDefines;
+
+  const headerBlocks: string[] = [];
+  if (group1.length > 0) headerBlocks.push(group1.join('\n'));
+  if (group2.length > 0) headerBlocks.push(group2.join('\n'));
+  if (group3.length > 0) headerBlocks.push(group3.join('\n'));
+
+  const formattedHeader = headerBlocks.join('\n\n');
+
+  if (headerBlocks.length === 0) {
+    return cleanedSongLines.join('\n');
+  }
+
+  if (cleanedSongLines.length > 0) {
+    // Exactly 2 empty rows before the song area begins = 3 newlines (\n\n\n)
+    return `${formattedHeader}\n\n\n${cleanedSongLines.join('\n')}`;
+  }
+
+  return formattedHeader;
+}
+
+/**
+ * Detects if cursor is positioned inside a [chord] bracket, and if so,
+ * shifts the position to right after the closing ']' bracket of that chord.
+ */
+export function adjustCursorToRightOfChord(text: string, pos: number): number {
+  const chordRegex = /\[([^\]]+)\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = chordRegex.exec(text)) !== null) {
+    const chordStart = match.index;
+    const chordEnd = chordStart + match[0].length; // index right after ']'
+    // If cursor is strictly after '[' and up to or at ']' (i.e. inside the chord)
+    if (pos > chordStart && pos <= chordEnd - 1) {
+      return chordEnd;
+    }
+  }
+  return pos;
+}
+
+/**
+ * Inserts a chord into a ChordPro line at the specified cursor position,
+ * handling spaces appropriately between adjacent chords or lyrics.
+ */
+export function insertChordIntoLine(line: string, chordName: string, pos: number): string {
+  const cleanName = chordName.trim().replace(/^\[|\]$/g, '');
+  if (!cleanName) return line;
+  const chordBracket = `[${cleanName}]`;
+  
+  const safePos = Math.max(0, Math.min(line.length, pos));
+  const before = line.slice(0, safePos);
+  const after = line.slice(safePos);
+
+  const needsSpaceBefore = before.endsWith(']') && !before.endsWith(' ');
+  const spaceBefore = needsSpaceBefore ? ' ' : '';
+  const needsSpaceAfter = after.startsWith('[') && !after.startsWith(' ');
+  const spaceAfter = needsSpaceAfter ? ' ' : '';
+
+  return `${before}${spaceBefore}${chordBracket}${spaceAfter}${after}`;
+}

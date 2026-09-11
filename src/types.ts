@@ -1,8 +1,12 @@
+import { ChordVoicing } from './utils/guitarChords';
+
 export interface ChordSegment {
   chord?: string;
   lyrics: string;
   isChordOnly?: boolean;
 }
+
+export type DisplayMode = 'summary' | 'normal' | 'detailed';
 
 export type LineType = 
   | 'lyrics' 
@@ -15,6 +19,8 @@ export type LineType =
   | 'tab_end' 
   | 'tab' 
   | 'directive' 
+  | 'define'
+  | 'scroll_pause'
   | 'empty';
 
 export interface ChordProLine {
@@ -22,6 +28,19 @@ export interface ChordProLine {
   segments?: ChordSegment[];
   text?: string;
   raw?: string;
+  pauseSeconds?: number;
+  sourceLineIndex?: number;
+}
+
+export type BackTrackType = 'youtube' | 'audio-url' | 'github' | 'local' | 'web';
+
+export interface BackTrackItem {
+  id: string; // e.g. "BackTrack1"
+  index: number; // 1 to 5
+  description: string;
+  url: string;
+  type: BackTrackType;
+  rawDirective?: string;
 }
 
 export interface ParsedChordPro {
@@ -34,9 +53,12 @@ export interface ParsedChordPro {
   timeSignature?: string;
   capo?: number;
   duration?: string;
+  scrollSpeed?: number; // pixels per second default auto-scroll speed
   comment?: string;
   lines: ChordProLine[];
   metadata: Record<string, string>;
+  backtracks?: BackTrackItem[];
+  customChords?: Record<string, ChordVoicing>;
   raw: string;
 }
 
@@ -51,6 +73,9 @@ export interface Song {
   timeSignature?: string;
   capo?: number;
   duration?: string;
+  scrollSpeed?: number; // Default auto-scroll speed (px/s)
+  backtracks?: BackTrackItem[];
+  customChords?: Record<string, ChordVoicing>;
   rawChordPro: string;
   parsed?: ParsedChordPro;
   filePath?: string;
@@ -86,13 +111,17 @@ export interface MetronomeState {
   volume: number; // 0 to 1
 }
 
-export type RepositorySourceType = 'local-drive' | 'github-url' | 'bundled';
+export type RepositorySourceType = 'local-drive' | 'github-master' | 'github-url' | 'bundled';
 
 export interface RepositoryConfig {
   sourceType?: RepositorySourceType;
-  directoryPath: string; // Local path e.g. "D:/Songbook/" or "/Music/ChordPro/" or GitHub URL "https://github.com/gitongsy28/SongScroll/tree/main/public/SongBook/"
+  directoryPath: string; // Local path e.g. "D:/Songbook/" or GitHub URL "https://github.com/gitongsy28/mastersongbook"
   directoryName: string;
-  githubUrl?: string;
+  githubUrl?: string; // Shared GitHub URL (e.g. gigsongbook)
+  githubToken?: string; // GitHub Personal Access Token (for private shared repo or master repo)
+  masterGithubUrl?: string; // Master GitHub Repository URL (e.g. mastersongbook)
+  masterGithubToken?: string; // Master GitHub Personal Access Token (with write permission)
+  masterSubtype?: 'local' | 'github'; // Sub-mode inside Master Repo
   isFileSystemApiSupported: boolean;
   hasDirectoryHandle: boolean;
   lastSyncedAt?: number;
