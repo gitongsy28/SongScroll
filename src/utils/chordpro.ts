@@ -1363,3 +1363,54 @@ export function insertChordIntoLine(line: string, chordName: string, pos: number
 
   return `${before}${spaceBefore}${chordBracket}${spaceAfter}${after}`;
 }
+
+/**
+ * Moves a chord within a ChordPro line from its source index/occurrence to a new cursor position.
+ */
+export function moveChordInLine(
+  line: string,
+  chordName: string,
+  targetChordIndexInLine: number | undefined,
+  newPos: number
+): string {
+  const cleanName = chordName.trim().replace(/^\[|\]$/g, '');
+  if (!cleanName) return line;
+
+  let chordCount = 0;
+  let removedStart = -1;
+  let removedEnd = -1;
+
+  // First pass: locate and remove the targeted chord occurrence
+  const chordRegex = /\[([^\]]+)\]/g;
+  let match: RegExpExecArray | null;
+  while ((match = chordRegex.exec(line)) !== null) {
+    if (targetChordIndexInLine !== undefined && targetChordIndexInLine >= 0) {
+      if (chordCount === targetChordIndexInLine) {
+        removedStart = match.index;
+        removedEnd = match.index + match[0].length;
+        break;
+      }
+    } else if (match[1] === cleanName) {
+      removedStart = match.index;
+      removedEnd = match.index + match[0].length;
+      break;
+    }
+    chordCount++;
+  }
+
+  if (removedStart === -1) {
+    // If not found by index or name, fallback to standard insertion
+    return insertChordIntoLine(line, cleanName, newPos);
+  }
+
+  const lineWithoutChord = line.slice(0, removedStart) + line.slice(removedEnd);
+  const removedLength = removedEnd - removedStart;
+
+  // Adjust newPos if it was located after the removed chord
+  let adjustedPos = newPos;
+  if (newPos > removedStart) {
+    adjustedPos = Math.max(removedStart, newPos - removedLength);
+  }
+
+  return insertChordIntoLine(lineWithoutChord, cleanName, adjustedPos);
+}

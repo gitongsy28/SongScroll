@@ -39,6 +39,7 @@ import {
   adjustCursorToRightOfChord,
   generateSummaryLines, 
   insertChordIntoLine,
+  moveChordInLine,
   isValidBackTrack, 
   parseChordPro, 
   reformatChordPro,
@@ -112,12 +113,15 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     rawLine?: string;
   } | null>(null);
 
-  // Add Chord mode & dialog state
+  // Add / Move Chord mode & dialog state
   const [isAddChordMode, setIsAddChordMode] = useState<boolean>(false);
   const [insertChordModal, setInsertChordModal] = useState<{
     isOpen: boolean;
     sourceLineIndex: number;
     previewLineText: string;
+    mode?: 'add' | 'move';
+    targetChordIndexInLine?: number;
+    rawChord?: string;
   } | null>(null);
   const [insertChordName, setInsertChordName] = useState<string>('');
   const [insertCursorPos, setInsertCursorPos] = useState<number>(0);
