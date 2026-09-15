@@ -1,6 +1,6 @@
 import { RepositoryConfig, RepositorySourceType, Song, ViewerSettings } from '../types';
 import { createSongFromChordPro, deduplicateSongs, parseChordPro } from './chordpro';
-import { getInitialSongs } from './sampleSongs';
+import { getInitialSongs, SAMPLE_CHORDPRO_DATA } from './sampleSongs';
 import { commitSongFileToGitHub } from './githubSync';
 
 const DB_NAME = 'chordpro_reader_db';
