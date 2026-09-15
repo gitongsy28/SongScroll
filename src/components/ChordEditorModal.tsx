@@ -9,6 +9,7 @@ import {
   downloadSongFile, 
   restoreActiveDirectoryHandle 
 } from '../utils/storage';
+import { TabDiagram } from './TabDiagram';
 
 interface ChordEditorModalProps {
   isOpen: boolean;
@@ -523,6 +524,15 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             >
               Chord [G]
             </button>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleInsertDirective('{start_of_tab: Intro Riff (with techniques)}\ne|-----0-------0h2p0-----3b5r3-----|---------------------------------|\nB|---------1---------1---------0---|-----5h7p5-----8b10r8~~~---------|\nG|-----2-------2-------2-------2---|-4/6-------6---------------7p5---|\nD|-2-------2-------2-------2-------|---------------------------------|\nA|---------------------------------|---------------------------------|\nE|---------------------------------|---------------------------------|\n{end_of_tab}')}
+              className="px-2 py-1 bg-amber-500/25 text-amber-300 hover:bg-amber-500/35 border border-amber-500/50 rounded font-mono shrink-0 font-semibold"
+              title="Insert 6-string TAB with dash breaks (can also be edited to 4 strings for Ukulele)"
+            >
+              {'{Tab}'}
+            </button>
           </div>
         )}
 
@@ -560,6 +570,12 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
               }}
               placeholder="Enter ChordPro text format here..."
               className="w-full h-full p-5 bg-slate-950 font-mono-chord text-xs sm:text-sm text-slate-200 resize-none focus:outline-none focus:ring-0 leading-relaxed selection:bg-amber-500/30"
+              style={{
+                fontFamily: 'Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace',
+                fontVariantLigatures: 'none',
+                fontFeatureSettings: '"liga" 0, "calt" 0, "dlig" 0',
+                letterSpacing: '0.035em',
+              }}
               spellCheck={false}
             />
           ) : (
@@ -604,6 +620,21 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
                         Chorus:
                       </div>
                     );
+                  }
+                  if (line.type === 'tab' || line.type === 'tab_start') {
+                    const tabLines = line.tabLines && line.tabLines.length > 0 
+                      ? line.tabLines 
+                      : (line.type === 'tab' && line.text ? [line.text] : []);
+                    return (
+                      <TabDiagram 
+                        key={idx} 
+                        title={line.text} 
+                        lines={tabLines} 
+                      />
+                    );
+                  }
+                  if (line.type === 'tab_end') {
+                    return null;
                   }
                   if (line.type === 'lyrics' && line.segments) {
                     return (

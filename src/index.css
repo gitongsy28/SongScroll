@@ -9,7 +9,16 @@
 }
 
 .font-mono-chord {
-  font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", ui-monospace, SFMono-Regular, monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0, "dlig" 0;
+  letter-spacing: 0.035em;
+}
+
+.tab-diagram-pre {
+  font-family: Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0, "dlig" 0;
 }
 
 /* Custom scrollbar for performance screens */

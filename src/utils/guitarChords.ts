@@ -1429,12 +1429,12 @@ export function parseChordName(chordName: string): { root: string; quality: stri
   if (!chordName) return { root: '', quality: '' };
   
   const parts = chordName.trim().split('/');
-  const main = parts[0];
-  const bass = parts[1] ? parts[1].trim() : undefined;
+  const main = parts[0].trim().replace(/^[\*]+|[\*]+$/g, '');
+  const bass = parts[1] ? parts[1].trim().replace(/^[\*]+|[\*]+$/g, '') : undefined;
 
   const match = main.match(/^([A-G][#b]?)(.*)$/);
   if (!match) {
-    return { root: chordName, quality: '', bass };
+    return { root: main || chordName, quality: '', bass };
   }
 
   return {
@@ -1585,6 +1585,15 @@ export function getGuitarChordData(chordName: string): GuitarChordData | null {
     return GUITAR_CHORDS_LIBRARY[trimmed];
   }
 
+  // Also check without asterisks (e.g. C* -> C)
+  const cleanTrimmed = trimmed.replace(/^[\*]+|[\*]+$/g, '');
+  if (cleanTrimmed !== trimmed && GUITAR_CHORDS_LIBRARY[cleanTrimmed]) {
+    return {
+      ...GUITAR_CHORDS_LIBRARY[cleanTrimmed],
+      chord: trimmed,
+    };
+  }
+
   // 2. Check without slash bass if slash chord not specifically found
   const { root, quality, bass } = parseChordName(trimmed);
   const baseChord = `${root}${quality}`;
@@ -1599,7 +1608,7 @@ export function getGuitarChordData(chordName: string): GuitarChordData | null {
   }
 
   // 3. Fallback to procedural movable generator
-  return generateMovableChord(trimmed);
+  return generateMovableChord(cleanTrimmed) || generateMovableChord(trimmed);
 }
 
 /**
@@ -1856,20 +1865,21 @@ export function detectChordFromVoicing(
   }
 
   const rootName = CHROMATIC_NOTES_SHARP[bestRoot];
-  const baseAlteredName = `*${rootName}${bestQuality}`;
+  const slash = (bassPitch !== bestRoot && bassName) ? `/${bassName}` : '';
+  const baseAlteredName = `${rootName}${bestQuality}${slash}*`;
 
   // Check for chord name duplication in existing custom chords
   let resolvedChordName = baseAlteredName;
   if (existingCustomChords) {
-    let asteriskPrefix = '*';
+    let asteriskSuffix = '*';
     const fretsKey = frets.join(',');
 
     while (
       existingCustomChords[resolvedChordName] &&
       existingCustomChords[resolvedChordName].frets.join(',') !== fretsKey
     ) {
-      asteriskPrefix += '*';
-      resolvedChordName = `${asteriskPrefix}${rootName}${bestQuality}`;
+      asteriskSuffix += '*';
+      resolvedChordName = `${rootName}${bestQuality}${slash}${asteriskSuffix}`;
     }
   }
 
@@ -1883,3 +1893,46 @@ export function detectChordFromVoicing(
     intervals: uniquePitches.map(p => (p - bestRoot + 12) % 12).map(String),
   };
 }
+
+/**
+ * Universal chord voicing resolver for both Detailed Mode diagrams and Chord Hints.
+ * Prioritizes explicitly defined custom chords, handles asterisks and raw chord names,
+ * and falls back to standard CAGED dictionary voicings.
+ */
+export function resolveChordVoicing(
+  chordName: string,
+  customVoicing?: ChordVoicing,
+  customChords?: Record<string, ChordVoicing>,
+  rawChord?: string
+): ChordVoicing | null {
+  if (customVoicing) return customVoicing;
+  if (customChords) {
+    if (customChords[chordName]) return customChords[chordName];
+    if (rawChord && customChords[rawChord]) return customChords[rawChord];
+
+    const clean = chordName.replace(/[\*]+$/, '').trim();
+    if (customChords[clean]) return customChords[clean];
+    if (customChords[`${clean}*`]) return customChords[`${clean}*`];
+
+    if (rawChord) {
+      const cleanRaw = rawChord.replace(/[\*]+$/, '').trim();
+      if (customChords[cleanRaw]) return customChords[cleanRaw];
+      if (customChords[`${cleanRaw}*`]) return customChords[`${cleanRaw}*`];
+    }
+  }
+
+  const chordData = getGuitarChordData(chordName);
+  if (chordData && chordData.voicings && chordData.voicings.length > 0) {
+    return chordData.voicings[0];
+  }
+
+  if (rawChord && rawChord !== chordName) {
+    const rawData = getGuitarChordData(rawChord);
+    if (rawData && rawData.voicings && rawData.voicings.length > 0) {
+      return rawData.voicings[0];
+    }
+  }
+
+  return null;
+}
+

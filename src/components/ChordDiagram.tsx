@@ -11,7 +11,8 @@ import {
   Save,
   CheckSquare,
   Square,
-  Trash2
+  Trash2,
+  MoveHorizontal
 } from 'lucide-react';
 import { 
   ChordVoicing, 
@@ -21,7 +22,8 @@ import {
   STRING_TUNING_NAMES, 
   strumGuitarChord,
   detectChordFromVoicing,
-  DetectedChordResult
+  DetectedChordResult,
+  resolveChordVoicing
 } from '../utils/guitarChords';
 
 export interface ChordDiagramProps {
@@ -36,6 +38,7 @@ export interface ChordDiagramProps {
     applyToAll: boolean
   ) => void;
   onDeleteChord?: () => void;
+  onMoveChord?: () => void;
   existingCustomChords?: Record<string, ChordVoicing>;
 }
 
@@ -46,6 +49,7 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
   showStrumButton = true,
   onKeepChange,
   onDeleteChord,
+  onMoveChord,
   existingCustomChords,
 }) => {
   // Check if there is an existing custom voicing for this chord
@@ -606,6 +610,22 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
               )
             )}
 
+            {onMoveChord && (
+              <button
+                type="button"
+                id="move-chord-btn"
+                onClick={() => {
+                  onMoveChord();
+                  onClose?.();
+                }}
+                className="px-3 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold rounded-xl text-xs flex items-center gap-1.5 transition-colors shrink-0"
+                title="Move this chord to a different position in the line"
+              >
+                <MoveHorizontal className="w-3.5 h-3.5" />
+                <span>Move</span>
+              </button>
+            )}
+
             <button
               type="button"
               id="keep-chord-change-btn"
@@ -638,14 +658,17 @@ export const ChordDiagram: React.FC<ChordDiagramProps> = ({
 interface MiniChordDiagramProps {
   chordName: string;
   customVoicing?: ChordVoicing;
+  customChords?: Record<string, ChordVoicing>;
+  rawChord?: string;
 }
 
 export const MiniChordDiagram: React.FC<MiniChordDiagramProps> = ({
   chordName,
   customVoicing,
+  customChords,
+  rawChord,
 }) => {
-  const standardData = getGuitarChordData(chordName);
-  const voicing = customVoicing || standardData?.voicings?.[0];
+  const voicing = resolveChordVoicing(chordName, customVoicing, customChords, rawChord);
 
   if (!voicing || !voicing.frets) {
     return null;

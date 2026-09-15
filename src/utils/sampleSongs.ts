@@ -18,6 +18,14 @@ export const SAMPLE_CHORDPRO_DATA: { filename: string; chordpro: string }[] = [
 {meta: BackTrack3 : Master Audio Accompaniment (GitHub MP3) : https://github.com/gitongsy28/MasterSongBook/blob/main/Crowded%20House%20-%20Don't%20Dream%20It's%20Over%20(Lyrics).mp3 : }
 
 {comment: Intro}
+{start_of_tab: Intro Riff (with techniques)}
+e|-----0-------0h2p0-----3b5r3-----|---------------------------------|
+B|---------1---------1---------0---|-----5h7p5-----8b10r8~~~---------|
+G|-----2-------2-------2-------2---|-4/6-------6---------------7p5---|
+D|-2-------2-------2-------2-------|---------------------------------|
+A|---------------------------------|---------------------------------|
+E|---------------------------------|---------------------------------|
+{end_of_tab}
 [Bm]  [F#7]  [A]  [E7]  [G]  [D]  [Em]  [F#7]
 
 {comment: Verse 1}

@@ -30,6 +30,7 @@ export interface ChordProLine {
   raw?: string;
   pauseSeconds?: number;
   sourceLineIndex?: number;
+  tabLines?: string[];
 }
 
 export type BackTrackType = 'youtube' | 'audio-url' | 'github' | 'local' | 'web';
@@ -48,6 +49,7 @@ export interface ParsedChordPro {
   artist: string;
   subtitle?: string;
   key?: string;
+  year?: string;
   era?: string; // e.g. "70s", "80s", "90s", "00s", "10s", etc.
   tempo?: number;
   timeSignature?: string;
@@ -68,6 +70,7 @@ export interface Song {
   artist: string;
   subtitle?: string;
   key?: string;
+  year?: string;
   era?: string; // e.g. "70s", "80s", "90s", "00s", "10s"
   tempo?: number; // BPM
   timeSignature?: string;

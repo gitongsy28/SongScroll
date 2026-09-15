@@ -22,7 +22,8 @@ import {
   Sparkles,
   Timer,
   Check,
-  Save
+  Save,
+  MoveHorizontal
 } from 'lucide-react';
 import { 
   BackTrackItem, 
@@ -37,24 +38,28 @@ import {
 } from '../types';
 import { 
   adjustCursorToRightOfChord,
+  buildHeaderInfoItems,
   generateSummaryLines, 
   insertChordIntoLine,
   moveChordInLine,
   isValidBackTrack, 
+  parseChordDefineDirective,
   parseChordPro, 
   reformatChordPro,
   serializeChordPro, 
   transposeChord, 
   updateChordProDefineDirective,
-  updateChordProScrollSpeed 
+  updateChordProScrollSpeed,
+  updateChordProBackTracks
 } from '../utils/chordpro';
 import { ChordVoicing } from '../utils/guitarChords';
 import { downloadSongFile } from '../utils/storage';
 import { Metronome } from './Metronome';
 import { ChordDiagram, MiniChordDiagram } from './ChordDiagram';
-import { ChordHint } from './ChordHint';
+import { ChordHint, ChordDiagramCard } from './ChordHint';
 import { BackTrackModal } from './BackTrackModal';
 import { BackTrackFloatingPlayer } from './BackTrackFloatingPlayer';
+import { TabDiagram } from './TabDiagram';
 
 interface SongViewerProps {
   song: Song;
@@ -136,7 +141,9 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   // Save prompt state on exit
   const [showSaveExitModal, setShowSaveExitModal] = useState<boolean>(false);
   const [isSavingOnExit, setIsSavingOnExit] = useState<boolean>(false);
-  const initialDefaultSpeed = song.scrollSpeed ?? song.parsed?.scrollSpeed;
+  const [initialDefaultSpeed, setInitialDefaultSpeed] = useState<number | undefined>(
+    song.scrollSpeed ?? song.parsed?.scrollSpeed
+  );
   const [hasManuallyChangedSpeed, setHasManuallyChangedSpeed] = useState<boolean>(false);
 
   // ScrollPause directive countdown state
@@ -157,6 +164,9 @@ export const SongViewer: React.FC<SongViewerProps> = ({
 
   // BackTrack accompaniment modal & floating player state
   const [showBackTrackModal, setShowBackTrackModal] = useState<boolean>(false);
+  const [songBackTracks, setSongBackTracks] = useState<BackTrackItem[]>(() => {
+    return song.backtracks || song.parsed?.backtracks || parseChordPro(song.rawChordPro).backtracks || [];
+  });
   const [activeFloatingTrack, setActiveFloatingTrack] = useState<BackTrackItem | null>(null);
 
   // Metronome tempo state (defaults to song tempo or 100)
@@ -234,6 +244,18 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     if (maxScroll > 0) {
       setScrollProgress(Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100)));
     }
+
+    // Re-arm any ScrollPause elements that have moved back below the trigger line
+    const pauseElements = containerRef.current.querySelectorAll('[data-scroll-pause]');
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const triggerLine = containerRect.top + containerRect.height * 0.35;
+    pauseElements.forEach((el) => {
+      const elRect = el.getBoundingClientRect();
+      const pauseId = el.getAttribute('data-pause-id') || 'pause-default';
+      if (elRect.top > triggerLine) {
+        triggeredPausesRef.current.delete(pauseId);
+      }
+    });
   }, []);
 
   // Update scroll speed whenever active song changes and has a defined scrollSpeed
@@ -336,8 +358,11 @@ export const SongViewer: React.FC<SongViewerProps> = ({
 
           pauseElements.forEach((el) => {
             const pauseId = el.getAttribute('data-pause-id') || 'pause-default';
-            if (!triggeredPausesRef.current.has(pauseId)) {
-              const elRect = el.getBoundingClientRect();
+            const elRect = el.getBoundingClientRect();
+            // If the element has moved back below the trigger line (e.g., scrolled up), re-arm it
+            if (elRect.top > triggerLine) {
+              triggeredPausesRef.current.delete(pauseId);
+            } else if (!triggeredPausesRef.current.has(pauseId)) {
               if (elRect.top <= triggerLine && elRect.top >= containerRect.top) {
                 triggeredPausesRef.current.add(pauseId);
                 const pauseSeconds = parseInt(el.getAttribute('data-scroll-pause') || '8', 10);
@@ -382,8 +407,43 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const handlePageUp = () => {
     if (containerRef.current) {
       const step = containerRef.current.clientHeight * 0.8;
-      containerRef.current.scrollBy({ top: -step, behavior: 'smooth' });
-      exactScrollTopRef.current = Math.max(0, exactScrollTopRef.current - step);
+      const targetScroll = Math.max(0, containerRef.current.scrollTop - step);
+      containerRef.current.scrollTo({ top: targetScroll, behavior: 'smooth' });
+      exactScrollTopRef.current = targetScroll;
+      handleSkipPause();
+
+      // Proactively clear any pauses above the target scroll position immediately
+      const pauseElements = containerRef.current.querySelectorAll('[data-scroll-pause]');
+      const containerH = containerRef.current.clientHeight;
+      pauseElements.forEach((el) => {
+        const elTop = (el as HTMLElement).offsetTop;
+        const triggerScrollPos = elTop - containerH * 0.35;
+        const pauseId = el.getAttribute('data-pause-id') || 'pause-default';
+        if (targetScroll < triggerScrollPos) {
+          triggeredPausesRef.current.delete(pauseId);
+        }
+      });
+
+      // Also schedule checks during and after smooth scrolling
+      const rearmPauses = () => {
+        if (!containerRef.current) return;
+        const pEls = containerRef.current.querySelectorAll('[data-scroll-pause]');
+        const cRect = containerRef.current.getBoundingClientRect();
+        const tLine = cRect.top + cRect.height * 0.35;
+        pEls.forEach((el) => {
+          const eRect = el.getBoundingClientRect();
+          const pId = el.getAttribute('data-pause-id') || 'pause-default';
+          if (eRect.top > tLine - 10) {
+            triggeredPausesRef.current.delete(pId);
+          }
+        });
+      };
+
+      rearmPauses();
+      setTimeout(rearmPauses, 50);
+      setTimeout(rearmPauses, 150);
+      setTimeout(rearmPauses, 300);
+      setTimeout(rearmPauses, 500);
     }
   };
 
@@ -392,6 +452,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       const step = containerRef.current.clientHeight * 0.8;
       containerRef.current.scrollBy({ top: step, behavior: 'smooth' });
       exactScrollTopRef.current += step;
+      handleSkipPause();
     }
   };
 
@@ -627,7 +688,22 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const targetLineText = useMemo(() => {
     if (!insertChordModal) return '';
     const lines = currentRawChordPro.split(/\r?\n/);
-    const targetIdx = insertChordModal.sourceLineIndex;
+    let targetIdx = insertChordModal.sourceLineIndex;
+
+    // Check if targetIdx points to the expected line
+    if (
+      targetIdx < 0 ||
+      targetIdx >= lines.length ||
+      (insertChordModal.previewLineText && lines[targetIdx] !== insertChordModal.previewLineText)
+    ) {
+      if (insertChordModal.previewLineText) {
+        const foundIdx = lines.findIndex((l) => l === insertChordModal.previewLineText);
+        if (foundIdx !== -1) {
+          targetIdx = foundIdx;
+        }
+      }
+    }
+
     if (targetIdx >= 0 && targetIdx < lines.length) {
       return lines[targetIdx];
     }
@@ -645,16 +721,61 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     setInsertCursorPos(adjustedPos);
   };
 
-  // Confirm inserting a new chord onto a line
+  // Confirm inserting or moving a chord onto a line
   const handleConfirmInsertChord = () => {
     if (!insertChordModal || !insertChordName.trim()) return;
     const cleanName = insertChordName.trim().replace(/^\[|\]$/g, '');
+    const chordOriginal = insertChordModal.rawChord 
+      ? insertChordModal.rawChord.trim().replace(/^\[|\]$/g, '') 
+      : cleanName;
+
     setCurrentRawChordPro((prevRaw) => {
       const lines = prevRaw.split(/\r?\n/);
-      const targetIdx = insertChordModal.sourceLineIndex;
+      let targetIdx = insertChordModal.sourceLineIndex;
+
+      // Locate line if indices shifted or preview line does not match directly
+      if (
+        targetIdx < 0 ||
+        targetIdx >= lines.length ||
+        (insertChordModal.previewLineText && lines[targetIdx] !== insertChordModal.previewLineText)
+      ) {
+        if (insertChordModal.previewLineText) {
+          const foundIdx = lines.findIndex((l) => l === insertChordModal.previewLineText);
+          if (foundIdx !== -1) {
+            targetIdx = foundIdx;
+          }
+        }
+      }
+
+      // If in move mode and target line still does not contain chord bracket, search by chord occurrence
+      if (insertChordModal.mode === 'move') {
+        if (
+          targetIdx < 0 || 
+          targetIdx >= lines.length || 
+          (!lines[targetIdx].includes(`[${chordOriginal}]`) && !lines[targetIdx].includes(`[${cleanName}]`))
+        ) {
+          const foundChordLine = lines.findIndex(
+            (l) => l.includes(`[${chordOriginal}]`) || l.includes(`[${cleanName}]`)
+          );
+          if (foundChordLine !== -1) {
+            targetIdx = foundChordLine;
+          }
+        }
+      }
+
       if (targetIdx >= 0 && targetIdx < lines.length) {
         const line = lines[targetIdx];
-        lines[targetIdx] = insertChordIntoLine(line, cleanName, insertCursorPos);
+        if (insertChordModal.mode === 'move') {
+          lines[targetIdx] = moveChordInLine(
+            line,
+            chordOriginal,
+            insertChordModal.targetChordIndexInLine,
+            insertCursorPos,
+            cleanName
+          );
+        } else {
+          lines[targetIdx] = insertChordIntoLine(line, cleanName, insertCursorPos);
+        }
         return lines.join('\n');
       }
       return prevRaw;
@@ -662,6 +783,34 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     setHasCustomChordChanges(true);
     setInsertChordModal(null);
     setInsertChordName('');
+    setInsertCursorPos(0);
+  };
+
+  // Initiate moving a chord from the chord diagram modal
+  const handleInitiateMoveChord = () => {
+    if (!activeChordTarget || activeChordTarget.sourceLineIndex === undefined) return;
+    const rawLines = currentRawChordPro.split(/\r?\n/);
+    const targetIdx = activeChordTarget.sourceLineIndex;
+    const exactLine = (targetIdx >= 0 && targetIdx < rawLines.length)
+      ? rawLines[targetIdx]
+      : (activeChordTarget.rawLine || '');
+
+    const chordNameToMove = activeChordTarget.rawChord || (
+      transposeOffset !== 0 
+        ? transposeChord(activeChordTarget.chord, -transposeOffset, preferSharps) 
+        : activeChordTarget.chord
+    );
+
+    setActiveChordDiagram(null);
+    setInsertChordName(chordNameToMove);
+    setInsertChordModal({
+      isOpen: true,
+      sourceLineIndex: targetIdx,
+      previewLineText: exactLine,
+      mode: 'move',
+      targetChordIndexInLine: activeChordTarget.chordIndexInLine,
+      rawChord: chordNameToMove,
+    });
     setInsertCursorPos(0);
   };
 
@@ -677,6 +826,49 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       onBack();
     }
   }, [hasPendingChanges, onBack]);
+
+  // Save changes and return to song without exiting
+  const handleConfirmSaveAndReturn = async () => {
+    setIsSavingOnExit(true);
+    try {
+      // 1. Update raw with scroll speed if speed was altered
+      let rawToSave = currentRawChordPro;
+      if (hasSpeedDiff) {
+        rawToSave = updateChordProScrollSpeed(rawToSave, scrollSpeed);
+      }
+
+      // 2. Reformat and beautify directives in standard order!
+      rawToSave = reformatChordPro(rawToSave);
+
+      // 3. Parse updated song
+      const updatedParsed = parseChordPro(rawToSave);
+      updatedParsed.customChords = { ...updatedParsed.customChords, ...songCustomChords };
+
+      const updatedSong: Song = {
+        ...song,
+        scrollSpeed: scrollSpeed,
+        rawChordPro: rawToSave,
+        parsed: updatedParsed,
+        backtracks: updatedParsed.backtracks,
+        updatedAt: Date.now(),
+      };
+
+      if (onSaveSong) {
+        await onSaveSong(updatedSong);
+      }
+
+      // Update in-memory state so user can continue without exit
+      setCurrentRawChordPro(rawToSave);
+      setInitialDefaultSpeed(scrollSpeed);
+      setHasManuallyChangedSpeed(false);
+      setHasCustomChordChanges(false);
+      setShowSaveExitModal(false);
+    } catch (err) {
+      console.error('Failed to save song changes:', err);
+    } finally {
+      setIsSavingOnExit(false);
+    }
+  };
 
   // Save changes and return to songbook
   const handleConfirmSaveAndExit = async () => {
@@ -700,6 +892,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         scrollSpeed: scrollSpeed,
         rawChordPro: rawToSave,
         parsed: updatedParsed,
+        backtracks: updatedParsed.backtracks,
         updatedAt: Date.now(),
       };
 
@@ -721,9 +914,17 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   };
 
   // BackTrack handlers
+  const handleUpdateBackTracks = (updatedTracks: BackTrackItem[]) => {
+    setSongBackTracks(updatedTracks);
+    setCurrentRawChordPro((prevRaw) => {
+      return updateChordProBackTracks(prevRaw, updatedTracks);
+    });
+    setHasCustomChordChanges(true);
+  };
+
   const allSongBackTracks: BackTrackItem[] = useMemo(() => {
-    return song.backtracks || song.parsed?.backtracks || parsed.backtracks || parseChordPro(song.rawChordPro).backtracks || [];
-  }, [song.id, song.backtracks, song.parsed?.backtracks, song.rawChordPro, parsed.backtracks]);
+    return songBackTracks;
+  }, [songBackTracks]);
 
   const validBackTracks = useMemo(() => {
     return allSongBackTracks.filter(isValidBackTrack);
@@ -791,6 +992,39 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   // Calculate current transposed key name
   const originalKey = parsed.key || song.key || '';
   const currentKey = originalKey ? transposeChord(originalKey, transposeOffset, preferSharps) : '';
+
+  // Auto created header info line items
+  const headerInfoItems = useMemo(() => {
+    return buildHeaderInfoItems(parsed, currentKey);
+  }, [parsed, currentKey]);
+
+  // Graphical defined chords list ({define: ...})
+  const definedChordsList = useMemo(() => {
+    const list: { name: string; voicing: ChordVoicing }[] = [];
+    const seen = new Set<string>();
+
+    for (const pl of parsed.lines) {
+      if (pl.type === 'define' && pl.text) {
+        const def = parseChordDefineDirective(pl.text);
+        if (def && !seen.has(def.name)) {
+          seen.add(def.name);
+          list.push(def);
+        }
+      }
+    }
+
+    if (songCustomChords) {
+      for (const [cName, val] of Object.entries(songCustomChords)) {
+        const voicing = val as ChordVoicing;
+        if (!seen.has(cName) && voicing && Array.isArray(voicing.frets)) {
+          seen.add(cName);
+          list.push({ name: cName, voicing });
+        }
+      }
+    }
+
+    return list;
+  }, [parsed.lines, songCustomChords]);
 
   // Theme styling definitions
   const themeStyles = {
@@ -1052,42 +1286,75 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       >
         <div className="max-w-4xl mx-auto space-y-6 pb-40">
           {/* Song Header Info Card */}
-          <div className="border-b border-slate-800/50 pb-4 flex flex-wrap items-baseline justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-                  {parsed.title}
-                </h2>
-                {parsed.era && (
-                  <span className="px-2 py-0.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-md text-xs sm:text-sm font-mono font-bold">
-                    {parsed.era}
-                  </span>
-                )}
-              </div>
-              <p className="text-base sm:text-lg opacity-80 mt-0.5">
+          <div className="border-b border-slate-800/50 pb-4">
+            <div className="flex flex-col gap-1">
+              <h2 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+                {parsed.title}
+              </h2>
+              <p className="text-base sm:text-lg opacity-80">
                 {parsed.artist}
               </p>
-            </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
-              {originalKey && (
-                <KeyBadgeItem
-                  originalKey={originalKey}
-                  currentKey={currentKey}
-                  transposeOffset={transposeOffset}
-                  onClick={() => setActiveChordDiagram(currentKey || originalKey)}
-                />
+              {/* Auto Created Header Info Line displaying concatenated text of specifically defined notations */}
+              {headerInfoItems.length > 0 && (
+                <div 
+                  id="song-header-info-line"
+                  className="mt-2 text-xs sm:text-sm font-mono text-slate-300 flex flex-wrap items-center gap-y-1 select-none"
+                >
+                  {headerInfoItems.map((item, idx) => (
+                    <React.Fragment key={item.type}>
+                      {idx > 0 && <span className="mx-2 text-slate-500 font-sans">|</span>}
+                      {item.isKeyChord ? (
+                        <span
+                          onClick={() => setActiveChordDiagram(item.value)}
+                          className="cursor-pointer hover:text-amber-300 underline decoration-dotted underline-offset-2 transition-colors inline-flex items-center gap-1 font-semibold text-amber-400"
+                          title={`Click to view or edit chord diagram for key ${item.value}`}
+                        >
+                          <span>Key: {item.value}</span>
+                          {transposeOffset !== 0 && (
+                            <span className="text-xs text-amber-300 font-normal no-underline">
+                              ➔ {currentKey} ({transposeOffset > 0 ? `+${transposeOffset}` : transposeOffset})
+                            </span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="opacity-90">{item.fullText}</span>
+                      )}
+                    </React.Fragment>
+                  ))}
+                </div>
               )}
-              {parsed.capo !== undefined && parsed.capo > 0 && (
-                <span className="px-2.5 py-1 bg-purple-950/70 border border-purple-800/60 text-purple-300 rounded-lg">
-                  Capo: Fret {parsed.capo}
-                </span>
-              )}
-              <span className="px-2.5 py-1 bg-amber-950/70 border border-amber-800/60 text-amber-300 rounded-lg">
-                Tempo: {currentTempo} BPM ({parsed.timeSignature || '4/4'})
-              </span>
             </div>
           </div>
+
+          {/* Defined Chords Graphical Row ({define: ...}) at the beginning of song before intro */}
+          {definedChordsList.length > 0 && (
+            <div 
+              id="defined-chords-row" 
+              className="p-3 bg-slate-900/60 border border-slate-800/80 rounded-xl"
+            >
+              <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center gap-1.5 select-none">
+                <Guitar className="w-3.5 h-3.5 text-amber-400" />
+                <span>Custom Defined Chords</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 overflow-x-auto pb-1">
+                {definedChordsList.map((item) => (
+                  <div
+                    key={item.name}
+                    onClick={() => setActiveChordDiagram(item.name)}
+                    className="cursor-pointer transition-transform hover:scale-105 active:scale-95"
+                    title={`Click to edit [${item.name}] chord diagram`}
+                  >
+                    <ChordDiagramCard
+                      chordName={item.name}
+                      voicing={item.voicing}
+                      className="shadow-sm hover:border-amber-400"
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Mode Notification Banners */}
           {displayMode === 'summary' && (
@@ -1146,6 +1413,34 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 customChords={songCustomChords}
                 isAddChordMode={isAddChordMode}
                 onChordClick={(chord, context) => {
+                  if (isAddChordMode) {
+                    // Selecting a specific chord while Add Chord mode is active switches directly to Move Chord!
+                    const rawLines = currentRawChordPro.split(/\r?\n/);
+                    const targetIdx = context?.sourceLineIndex ?? idx;
+                    const exactLine = (targetIdx >= 0 && targetIdx < rawLines.length)
+                      ? rawLines[targetIdx]
+                      : (context?.rawLine || '');
+
+                    const chordNameToMove = context?.rawChord || (
+                      transposeOffset !== 0 
+                        ? transposeChord(chord, -transposeOffset, preferSharps) 
+                        : chord
+                    );
+
+                    setInsertChordName(chordNameToMove);
+                    setInsertChordModal({
+                      isOpen: true,
+                      sourceLineIndex: targetIdx,
+                      previewLineText: exactLine,
+                      mode: 'move',
+                      targetChordIndexInLine: context?.chordIndexInLine,
+                      rawChord: chordNameToMove,
+                    });
+                    setInsertCursorPos(0);
+                    setIsAddChordMode(false);
+                    return;
+                  }
+
                   setActiveChordTarget(context ? { chord, ...context } : { chord, rawChord: chord });
                   setActiveChordDiagram(chord);
                 }}
@@ -1156,10 +1451,12 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                     ? rawLines[targetIdx]
                     : (lineText || '');
 
+                  setInsertChordName('');
                   setInsertChordModal({
                     isOpen: true,
                     sourceLineIndex: targetIdx,
                     previewLineText: exactLine,
+                    mode: 'add',
                   });
                   setInsertCursorPos(0);
                   setIsAddChordMode(false);
@@ -1170,26 +1467,26 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         </div>
       </main>
 
-      {/* Floating ScrollPause Countdown Badge (shown when lead/solo pause is triggered) */}
+      {/* Floating ScrollPause Countdown Badge (shown when lead/solo pause is triggered - 20% smaller) */}
       {isScrollPausedByDirective && pauseCountdown !== null && (
         <div 
           id="scroll-pause-countdown-badge"
           onClick={handleSkipPause}
-          className="fixed top-20 right-6 sm:right-12 z-50 bg-slate-900/95 border-2 border-amber-400 text-amber-300 px-4 py-3 rounded-2xl shadow-2xl backdrop-blur-md flex items-center gap-3.5 cursor-pointer hover:bg-slate-800 transition-transform active:scale-95 animate-bounce"
+          className="fixed top-20 right-6 sm:right-12 z-50 bg-slate-900/95 border-2 border-amber-400 text-amber-300 px-3 py-2 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-2.5 cursor-pointer hover:bg-slate-800 transition-transform active:scale-95 animate-bounce"
           title="Lead/Solo pause in progress - Click to resume scrolling immediately"
         >
-          <div className="p-2 bg-amber-500/20 rounded-xl border border-amber-500/40">
-            <Timer className="w-6 h-6 text-amber-400 animate-pulse" />
+          <div className="p-1.5 bg-amber-500/20 rounded-lg border border-amber-500/40">
+            <Timer className="w-4 h-4 text-amber-400 animate-pulse" />
           </div>
           <div>
-            <div className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">
+            <div className="text-[9px] font-bold text-slate-300 uppercase tracking-wider">
               Solo / Lead Break Pause
             </div>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-black text-amber-400 font-mono">
+              <span className="text-2xl font-black text-amber-400 font-mono">
                 {pauseCountdown}s
               </span>
-              <span className="text-[10px] text-amber-300/80 underline font-medium">
+              <span className="text-[9px] text-amber-300/80 underline font-medium">
                 Tap to resume
               </span>
             </div>
@@ -1207,6 +1504,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           }}
           onKeepChange={handleKeepChordChange}
           onDeleteChord={handleDeleteChord}
+          onMoveChord={handleInitiateMoveChord}
           existingCustomChords={songCustomChords}
         />
       )}
@@ -1223,9 +1521,18 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl p-5 shadow-2xl space-y-4"
           >
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
-                <Plus className="w-4 h-4" />
-                <span>Insert Chord to Line</span>
+              <div className="flex items-center gap-2 font-bold text-sm">
+                {insertChordModal.mode === 'move' ? (
+                  <>
+                    <MoveHorizontal className="w-4 h-4 text-sky-400" />
+                    <span className="text-sky-300">Move Chord [{insertChordName.trim().replace(/^\[|\]$/g, '') || '...'}] in Line</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-4 h-4 text-amber-400" />
+                    <span className="text-amber-400">Insert Chord to Line</span>
+                  </>
+                )}
               </div>
               <button 
                 onClick={() => setInsertChordModal(null)}
@@ -1240,7 +1547,9 @@ export const SongViewer: React.FC<SongViewerProps> = ({
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
                   <span>Target Line</span>
-                  <span className="text-[11px] font-normal text-amber-400/90">(Click to position chord)</span>
+                  <span className="text-[11px] font-normal text-amber-400/90">
+                    {insertChordModal.mode === 'move' ? '(Click to choose new position for chord)' : '(Click to position chord)'}
+                  </span>
                 </label>
                 <div className="flex items-center gap-1.5 text-[11px] text-slate-400">
                   <span className="text-[10px] text-slate-400">Jump:</span>
@@ -1289,24 +1598,40 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 />
               </div>
               <p className="text-[11px] text-slate-400 mt-1">
-                Click in the text box above to position where the chord is added. If placed inside a chord, it automatically shifts to the right of the chord.
+                {insertChordModal.mode === 'move'
+                  ? 'Click anywhere in the text box above to move the chord to that position.'
+                  : 'Click in the text box above to position where the chord is added. If placed inside a chord, it automatically shifts to the right of the chord.'}
               </p>
             </div>
 
             {/* Live Line Preview */}
             <div className="p-3 bg-slate-950/90 border border-slate-800 rounded-xl space-y-1">
               <div className="flex items-center justify-between text-[11px] font-bold">
-                <span className="text-amber-400">Resulting Line Preview:</span>
+                <span className={insertChordModal.mode === 'move' ? 'text-sky-400' : 'text-amber-400'}>Resulting Line Preview:</span>
                 <span className="text-slate-400 font-mono text-[10px]">
                   Cursor at pos {insertCursorPos} of {targetLineText.length}
                 </span>
               </div>
               <div className="font-mono text-xs text-slate-200 overflow-x-auto whitespace-pre py-0.5">
-                <span className="text-slate-300">{targetLineText.slice(0, insertCursorPos)}</span>
-                <span className="inline-block px-1.5 py-0.2 bg-amber-400 text-slate-950 font-bold rounded shadow-sm">
-                  [{insertChordName.trim().replace(/^\[|\]$/g, '') || '?'}]
-                </span>
-                <span className="text-slate-300">{targetLineText.slice(insertCursorPos)}</span>
+                {insertChordModal.mode === 'move' ? (
+                  <span className="text-slate-300">
+                    {moveChordInLine(
+                      targetLineText,
+                      insertChordModal.rawChord || insertChordName.trim().replace(/^\[|\]$/g, '') || '?',
+                      insertChordModal.targetChordIndexInLine,
+                      insertCursorPos,
+                      insertChordName.trim().replace(/^\[|\]$/g, '') || '?'
+                    )}
+                  </span>
+                ) : (
+                  <>
+                    <span className="text-slate-300">{targetLineText.slice(0, insertCursorPos)}</span>
+                    <span className="inline-block px-1.5 py-0.2 bg-amber-400 text-slate-950 font-bold rounded shadow-sm">
+                      [{insertChordName.trim().replace(/^\[|\]$/g, '') || '?'}]
+                    </span>
+                    <span className="text-slate-300">{targetLineText.slice(insertCursorPos)}</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1364,10 +1689,23 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 type="button"
                 onClick={handleConfirmInsertChord}
                 disabled={!insertChordName.trim()}
-                className="px-4 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-50 text-slate-950 text-xs font-bold flex items-center gap-1.5"
+                className={`px-4 py-2 rounded-xl disabled:opacity-50 text-slate-950 text-xs font-bold flex items-center gap-1.5 ${
+                  insertChordModal.mode === 'move'
+                    ? 'bg-sky-400 hover:bg-sky-300 text-slate-950'
+                    : 'bg-amber-400 hover:bg-amber-300 text-slate-950'
+                }`}
               >
-                <Check className="w-4 h-4" />
-                Insert Chord
+                {insertChordModal.mode === 'move' ? (
+                  <>
+                    <MoveHorizontal className="w-4 h-4" />
+                    Move Chord
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    Insert Chord
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -1809,6 +2147,26 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 Discard & Exit
               </button>
               <button
+                id="save-exit-save-return-btn"
+                type="button"
+                disabled={isSavingOnExit}
+                onClick={handleConfirmSaveAndReturn}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-amber-300 border border-amber-500/40 hover:border-amber-400 shadow-sm flex items-center gap-1.5 transition-all disabled:opacity-50"
+                title="Save changes to file and stay in this song"
+              >
+                {isSavingOnExit ? (
+                  <>
+                    <span className="w-3.5 h-3.5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 text-amber-400" />
+                    <span>Save & Return</span>
+                  </>
+                )}
+              </button>
+              <button
                 id="save-exit-save-btn"
                 type="button"
                 disabled={isSavingOnExit}
@@ -1837,6 +2195,8 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         isOpen={showBackTrackModal}
         onClose={() => setShowBackTrackModal(false)}
         song={song}
+        backtracks={songBackTracks}
+        onUpdateBackTracks={handleUpdateBackTracks}
         onSelectTrack={handleSelectBackTrack}
         onEditSong={() => onEditSong(song)}
         activeTrackId={activeFloatingTrack?.id}
@@ -1857,8 +2217,9 @@ const KeyBadgeItem: React.FC<{
   originalKey: string;
   currentKey: string;
   transposeOffset: number;
+  customChords?: Record<string, ChordVoicing>;
   onClick: () => void;
-}> = ({ originalKey, currentKey, transposeOffset, onClick }) => {
+}> = ({ originalKey, currentKey, transposeOffset, customChords, onClick }) => {
   const [isHovered, setIsHovered] = useState(false);
   const activeKeyChord = currentKey || originalKey;
 
@@ -1881,7 +2242,11 @@ const KeyBadgeItem: React.FC<{
         )}
       </button>
       {isHovered && activeKeyChord && (
-        <ChordHint chordName={activeKeyChord} />
+        <ChordHint 
+          chordName={activeKeyChord} 
+          customVoicing={customChords?.[activeKeyChord]}
+          customChords={customChords}
+        />
       )}
     </div>
   );
@@ -1890,12 +2255,18 @@ const KeyBadgeItem: React.FC<{
 // Chord Segment item rendering with quick-reference graphic popup on cursor hover
 interface ChordSegmentItemProps {
   chord: string;
+  rawChord?: string;
+  customVoicing?: ChordVoicing;
+  customChords?: Record<string, ChordVoicing>;
   themeChordStyle: string;
-  onChordClick: (chord: string) => void;
+  onChordClick: () => void;
 }
 
 const ChordSegmentItem: React.FC<ChordSegmentItemProps> = ({
   chord,
+  rawChord,
+  customVoicing,
+  customChords,
   themeChordStyle,
   onChordClick,
 }) => {
@@ -1912,7 +2283,10 @@ const ChordSegmentItem: React.FC<ChordSegmentItemProps> = ({
       }}
     >
       <span
-        onClick={() => chord && onChordClick(chord)}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (chord) onChordClick();
+        }}
         className={`min-h-[1.3em] font-mono select-none cursor-pointer transition-all hover:underline ${
           chord ? themeChordStyle : 'opacity-0'
         }`}
@@ -1921,7 +2295,12 @@ const ChordSegmentItem: React.FC<ChordSegmentItemProps> = ({
       </span>
 
       {isHovered && chord && (
-        <ChordHint chordName={chord} />
+        <ChordHint 
+          chordName={chord} 
+          rawChord={rawChord}
+          customVoicing={customVoicing}
+          customChords={customChords}
+        />
       )}
     </div>
   );
@@ -1988,8 +2367,17 @@ const RenderLine: React.FC<RenderLineProps> = ({
     );
   }
 
-  if (line.type === 'chorus_end' || line.type === 'bridge_end' || line.type === 'tab_end') {
+  if (line.type === 'define') {
+    // Defined chords are rendered as graphical cards in the horizontal row before intro
+    return null;
+  }
+
+  if (line.type === 'chorus_end' || line.type === 'bridge_end') {
     return <div className="mb-3" />;
+  }
+
+  if (line.type === 'tab_end') {
+    return null;
   }
 
   if (line.type === 'bridge_start') {
@@ -2003,29 +2391,56 @@ const RenderLine: React.FC<RenderLineProps> = ({
   }
 
   if (line.type === 'tab' || line.type === 'tab_start') {
+    if (displayMode === 'summary') return null;
+
+    const tabTitle = line.text || '';
+    const tabLines = line.tabLines && line.tabLines.length > 0 
+      ? line.tabLines 
+      : (line.type === 'tab' && line.text ? [line.text] : []);
+
+    if (tabLines.length === 0 && !tabTitle) return null;
+
     return (
-      <pre className={`p-2.5 rounded-lg text-xs font-mono overflow-x-auto my-1 ${themeStyles.tab}`}>
-        {line.text || ''}
-      </pre>
+      <TabDiagram
+        title={tabTitle}
+        lines={tabLines}
+        isAddChordMode={isAddChordMode}
+      />
     );
   }
 
   // ScrollPause directive line
   if (line.type === 'scroll_pause') {
-    const pauseSec = line.scrollPauseSec || 8;
+    const pauseSec = line.pauseSeconds || line.scrollPauseSec || 8;
+    if (isAddChordMode) {
+      return (
+        <div 
+          data-scroll-pause={pauseSec}
+          data-pause-id={`pause-${lineIndex}`}
+          className="my-3 py-2 px-3.5 bg-amber-500/15 border border-amber-500/40 rounded-xl text-amber-300 flex items-center justify-between text-xs font-mono font-semibold select-none"
+        >
+          <div className="flex items-center gap-2">
+            <Timer className="w-4 h-4 text-amber-400" />
+            <span>Scroll Pause: {pauseSec}s (Guitar Solo / Lead Break)</span>
+          </div>
+          <span className="text-[10px] text-amber-400/80 font-sans hidden sm:inline">
+            Directive Line
+          </span>
+        </div>
+      );
+    }
+
+    // Playing screen: Static right-justified indicator to avoid distracting the musician
     return (
       <div 
         data-scroll-pause={pauseSec}
         data-pause-id={`pause-${lineIndex}`}
-        className="my-3 py-2 px-3.5 bg-amber-500/15 border border-amber-500/40 rounded-xl text-amber-300 flex items-center justify-between text-xs font-mono font-semibold select-none"
+        className="my-1.5 flex justify-end select-none"
       >
-        <div className="flex items-center gap-2">
-          <Timer className="w-4 h-4 text-amber-400 animate-pulse" />
-          <span>Scroll Pause: {pauseSec}s (Guitar Solo / Lead Break)</span>
+        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-300/80 text-xs font-mono">
+          <Timer className="w-3.5 h-3.5 text-amber-400" />
+          <span>{pauseSec}s</span>
         </div>
-        <span className="text-[10px] text-amber-400/80 font-sans hidden sm:inline">
-          Auto-pauses at 2/3 window height
-        </span>
       </div>
     );
   }
@@ -2083,7 +2498,9 @@ const RenderLine: React.FC<RenderLineProps> = ({
                   >
                     <MiniChordDiagram
                       chordName={transposedChord}
-                      customVoicing={customChords?.[transposedChord]}
+                      rawChord={rawChord}
+                      customVoicing={customChords?.[transposedChord] || (rawChord ? customChords?.[rawChord] : undefined)}
+                      customChords={customChords}
                     />
                   </div>
                 )}
@@ -2091,6 +2508,9 @@ const RenderLine: React.FC<RenderLineProps> = ({
                 {/* Chord Row */}
                 <ChordSegmentItem
                   chord={transposedChord}
+                  rawChord={rawChord}
+                  customVoicing={customChords?.[transposedChord] || (rawChord ? customChords?.[rawChord] : undefined)}
+                  customChords={customChords}
                   themeChordStyle={themeStyles.chord}
                   onChordClick={() => onChordClick(transposedChord, { 
                     chord: transposedChord, 
@@ -2133,8 +2553,9 @@ const ChordDiagramModal: React.FC<{
     applyToAll: boolean
   ) => void;
   onDeleteChord?: () => void;
+  onMoveChord?: () => void;
   existingCustomChords?: Record<string, ChordVoicing>;
-}> = ({ chord, onClose, onKeepChange, onDeleteChord, existingCustomChords }) => {
+}> = ({ chord, onClose, onKeepChange, onDeleteChord, onMoveChord, existingCustomChords }) => {
   return (
     <div 
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-150"
@@ -2146,6 +2567,7 @@ const ChordDiagramModal: React.FC<{
           onClose={onClose} 
           onKeepChange={onKeepChange}
           onDeleteChord={onDeleteChord}
+          onMoveChord={onMoveChord}
           existingCustomChords={existingCustomChords}
         />
       </div>

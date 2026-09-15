@@ -250,9 +250,22 @@ export async function loadAllSongs(): Promise<Song[]> {
       req.onsuccess = async () => {
         const results = req.result as Song[];
         if (results && results.length > 0) {
+          // Update Hotel California if stored version is missing the tab notation
+          const sampleHotel = SAMPLE_CHORDPRO_DATA.find((item) => item.filename.includes('Hotel California'));
+          if (sampleHotel) {
+            results.forEach((s) => {
+              if (
+                (s.title?.toLowerCase().includes('hotel california') || s.fileName?.toLowerCase().includes('hotel california')) &&
+                !s.rawChordPro?.includes('start_of_tab')
+              ) {
+                s.rawChordPro = sampleHotel.chordpro;
+              }
+            });
+          }
+
           results.forEach((s) => {
             if (s.rawChordPro) {
-              const p = s.parsed || parseChordPro(s.rawChordPro);
+              const p = parseChordPro(s.rawChordPro);
               if (s.scrollSpeed === undefined && p.scrollSpeed) {
                 s.scrollSpeed = p.scrollSpeed;
               }

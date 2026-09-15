@@ -90,6 +90,230 @@ export function transposeChord(chord: string, semitones: number, preferSharps?: 
 }
 
 /**
+ * Detects if a comment string was purely used to display song settings.
+ * e.g. "{comment: Key: E Major | Capo: None | Tempo: 84 BPM | Time: 4/4 | Duration: 3:15 | Year: 1970}"
+ * or "{comment: Song key: G major}"
+ */
+export function isSettingsComment(text: string): boolean {
+  if (!text) return false;
+  const clean = text.trim();
+  // Pipe-separated settings line, e.g. "Key: ... | Tempo: ..."
+  if (clean.includes('|') && /(?:key|tempo|capo|bpm|time|duration|year|era):/i.test(clean)) {
+    return true;
+  }
+  // Single setting lines
+  if (/^(?:song\s+)?key\s*:/i.test(clean) && !clean.toLowerCase().includes('solo')) return true;
+  if (/^capo\s*:/i.test(clean)) return true;
+  if (/^tempo\s*:/i.test(clean)) return true;
+  if (/^time\s*:\s*\d+\/\d+/i.test(clean)) return true;
+  if (/^duration\s*:/i.test(clean)) return true;
+  if (/^year(?:\s+of\s+release)?\s*:/i.test(clean)) return true;
+  if (/^era\s*:/i.test(clean)) return true;
+  return false;
+}
+
+export function extractSettingsFromCommentText(commentText: string): {
+  key?: string;
+  capo?: number;
+  tempo?: number;
+  time?: string;
+  duration?: string;
+  year?: string;
+  era?: string;
+} {
+  const result: {
+    key?: string;
+    capo?: number;
+    tempo?: number;
+    time?: string;
+    duration?: string;
+    year?: string;
+    era?: string;
+  } = {};
+  const segments = commentText.split('|').map(s => s.trim());
+  for (const seg of segments) {
+    const keyMatch = seg.match(/^(?:song\s+)?key\s*:\s*([^|(]+)/i);
+    if (keyMatch) {
+      const k = keyMatch[1].trim().replace(/\s+major$/i, '').replace(/\s+minor$/i, 'm');
+      if (k) result.key = k;
+    }
+    const capoMatch = seg.match(/^capo\s*:\s*([^|(]+)/i);
+    if (capoMatch) {
+      const cStr = capoMatch[1].trim().toLowerCase();
+      if (cStr === 'none' || cStr === 'no capo' || cStr === '0') {
+        result.capo = 0;
+      } else {
+        const num = parseInt(cStr, 10);
+        if (!isNaN(num)) result.capo = num;
+      }
+    }
+    const tempoMatch = seg.match(/^tempo\s*:\s*~?(\d+)/i);
+    if (tempoMatch) {
+      const t = parseInt(tempoMatch[1], 10);
+      if (!isNaN(t)) result.tempo = t;
+    }
+    const timeMatch = seg.match(/^time\s*:\s*(\d+\/\d+)/i);
+    if (timeMatch) {
+      result.time = timeMatch[1].trim();
+    }
+    const durMatch = seg.match(/^duration\s*:\s*([^|(]+)/i);
+    if (durMatch) {
+      result.duration = durMatch[1].trim();
+    }
+    const yearMatch = seg.match(/^year(?:\s+of\s+release)?\s*:\s*(\d{4})/i);
+    if (yearMatch) {
+      result.year = yearMatch[1].trim();
+    }
+    const eraMatch = seg.match(/^era\s*:\s*([^|(]+)/i);
+    if (eraMatch) {
+      result.era = eraMatch[1].trim();
+    }
+  }
+  return result;
+}
+
+export interface HeaderInfoItem {
+  type: string;
+  label: string;
+  value: string;
+  fullText: string;
+  isKeyChord?: boolean;
+}
+
+/**
+ * Builds the concatenated header info items specifically defined in the ChordPro file.
+ * The order strictly follows Beautify:
+ * 1. {key: Em}
+ * 2. {Year: 1963}
+ * 3. {Era: 90s}
+ * 4. {capo: 0}
+ * 5. {tempo: 85}
+ * 6. {time: 4/4}
+ * 7. {duration: 3:32}
+ * Excludes unused/undefined notations.
+ */
+export function buildHeaderInfoItems(
+  parsed: ParsedChordPro,
+  currentKey?: string
+): HeaderInfoItem[] {
+  const items: HeaderInfoItem[] = [];
+  const meta = parsed.metadata || {};
+
+  // 1. {key: Em}
+  const hasKey = meta['key'] !== undefined || meta['k'] !== undefined || !!parsed.key;
+  if (hasKey) {
+    const keyVal = currentKey || parsed.key || meta['key'] || meta['k'] || '';
+    if (keyVal) {
+      items.push({
+        type: 'key',
+        label: 'Key',
+        value: keyVal,
+        fullText: `Key: ${keyVal}`,
+        isKeyChord: true,
+      });
+    }
+  }
+
+  // 2. {Year: 1963}
+  const hasYear = meta['year'] !== undefined || !!parsed.year;
+  if (hasYear) {
+    const yearVal = parsed.year || meta['year'] || '';
+    if (yearVal) {
+      items.push({
+        type: 'year',
+        label: 'Year',
+        value: yearVal,
+        fullText: `Year: ${yearVal}`,
+      });
+    }
+  }
+
+  // 3. {Era: 90s}
+  const hasEra = meta['era'] !== undefined || meta['decade'] !== undefined || !!parsed.era;
+  if (hasEra) {
+    const eraVal = parsed.era || meta['era'] || meta['decade'] || '';
+    if (eraVal) {
+      items.push({
+        type: 'era',
+        label: 'Era',
+        value: eraVal,
+        fullText: `Era: ${eraVal}`,
+      });
+    }
+  }
+
+  // 4. {capo: 0}
+  const hasCapo = meta['capo'] !== undefined || parsed.capo !== undefined;
+  if (hasCapo && (parsed.capo !== undefined || meta['capo'] !== undefined)) {
+    const capoVal = parsed.capo !== undefined ? parsed.capo : meta['capo'];
+    items.push({
+      type: 'capo',
+      label: 'Capo',
+      value: String(capoVal),
+      fullText: `Capo: ${capoVal}`,
+    });
+  }
+
+  // 5. {tempo: 85}
+  const hasTempo = meta['tempo'] !== undefined || meta['bpm'] !== undefined || parsed.tempo !== undefined;
+  if (hasTempo) {
+    const tempoVal = parsed.tempo !== undefined ? parsed.tempo : (meta['tempo'] || meta['bpm']);
+    if (tempoVal) {
+      const cleanTempo = String(tempoVal).replace(/\s*bpm$/i, '').trim();
+      items.push({
+        type: 'tempo',
+        label: 'Tempo',
+        value: cleanTempo,
+        fullText: `Tempo: ${cleanTempo} Bpm`,
+      });
+    }
+  }
+
+  // 6. {time: 4/4}
+  const hasTime = meta['time'] !== undefined || meta['timesig'] !== undefined;
+  if (hasTime) {
+    const timeVal = parsed.timeSignature || meta['time'] || meta['timesig'] || '';
+    if (timeVal) {
+      items.push({
+        type: 'time',
+        label: 'Time',
+        value: timeVal,
+        fullText: `Time: ${timeVal}`,
+      });
+    }
+  }
+
+  // 7. {duration: 3:32}
+  const hasDuration = meta['duration'] !== undefined || !!parsed.duration;
+  if (hasDuration) {
+    const durRaw = parsed.duration || meta['duration'] || '';
+    if (durRaw) {
+      const cleanDur = durRaw.trim();
+      const formattedDur = /min$/i.test(cleanDur) ? cleanDur : `${cleanDur} Min`;
+      items.push({
+        type: 'duration',
+        label: 'Duration',
+        value: cleanDur,
+        fullText: `Duration: ${formattedDur}`,
+      });
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Detect if a line looks like an ASCII tablature string
+ * e.g. e|-----0-------0h2p0-----3b5r3-----|
+ * or B|---------1---------1---------0---|
+ * or |--0--2--3--|
+ */
+export function isTabStringNotation(str: string): boolean {
+  const t = str.trim();
+  return /^[eBGDAE1-7]?\s*\|[-0-9/\\hpsbrt~|xX><+*()# ]{4,}\|?$/i.test(t) && /[-0-9]{2,}/.test(t);
+}
+
+/**
  * Parse standard ChordPro file format into structured AST
  */
 export function parseChordPro(chordProText: string): ParsedChordPro {
@@ -101,6 +325,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
   let artist = 'Unknown Artist';
   let subtitle = '';
   let key: string | undefined;
+  let year: string | undefined;
   let era: string | undefined;
   let tempo: number | undefined;
   let timeSignature = '4/4';
@@ -110,6 +335,8 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
   const backtracksMap = new Map<number, BackTrackItem>();
   const customChordsMap: Record<string, ChordVoicing> = {};
   let inTab = false;
+  let currentTabTitle = '';
+  let currentTabLines: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -117,7 +344,11 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
     const trimmed = line.trim();
 
     if (!trimmed) {
-      parsedLines.push({ type: 'empty', raw: line, sourceLineIndex: i });
+      if (inTab) {
+        // Discard blank lines inside tab block to keep strings contiguous
+      } else {
+        parsedLines.push({ type: 'empty', raw: line, sourceLineIndex: i });
+      }
       continue;
     }
 
@@ -132,12 +363,44 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
         directive = inner.slice(0, colonIndex).trim().toLowerCase();
         value = inner.slice(colonIndex + 1).trim();
       } else {
-        directive = inner.toLowerCase();
+        directive = inner.toLowerCase().trim();
       }
 
       metadata[directive] = value;
+      // Normalize directive: replace spaces and hyphens with underscores
+      const normDirective = directive.replace(/[\s\-_]+/g, '_').toLowerCase();
 
-      switch (directive) {
+      // If we are currently inside a tab block, and encounter any directive other than tab markers,
+      // flush and close the tab block automatically to prevent corrupting the rest of the song.
+      const isTabMarker = (
+        normDirective === 'start_of_tab' ||
+        normDirective === 'startoftab' ||
+        normDirective === 'sot' ||
+        normDirective === 'tab' ||
+        normDirective === 'tab_start' ||
+        normDirective === 'tabstart' ||
+        normDirective === 'end_of_tab' ||
+        normDirective === 'endoftab' ||
+        normDirective === 'eot' ||
+        normDirective === 'end_tab' ||
+        normDirective === 'endtab' ||
+        normDirective === 'tab_end' ||
+        normDirective === 'tabend'
+      );
+
+      if (inTab && !isTabMarker) {
+        parsedLines.push({
+          type: 'tab_start',
+          text: currentTabTitle,
+          tabLines: [...currentTabLines],
+          raw: '{end_of_tab}',
+        });
+        parsedLines.push({ type: 'tab_end', raw: '{end_of_tab}' });
+        currentTabLines = [];
+        inTab = false;
+      }
+
+      switch (normDirective) {
         case 'title':
         case 't':
           title = value;
@@ -155,9 +418,11 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
         case 'k':
           key = value;
           break;
+        case 'year':
+          year = value;
+          break;
         case 'era':
         case 'decade':
-        case 'year':
           era = value;
           break;
         case 'tempo':
@@ -193,6 +458,10 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
               if (!isNaN(num) && num > 0) {
                 scrollSpeed = num;
               }
+            } else if (normKey === 'year') {
+              year = metaVal;
+            } else if (normKey === 'era' || normKey === 'decade') {
+              era = metaVal;
             } else if (/^backtrack([1-5])$/.test(normKey)) {
               const bt = parseBackTrackEntry(metaKey, metaVal, line);
               if (bt) {
@@ -252,7 +521,19 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
         case 'c':
         case 'ci':
         case 'cb':
-          parsedLines.push({ type: 'comment', text: value, raw: line });
+          if (isSettingsComment(value)) {
+            const extracted = extractSettingsFromCommentText(value);
+            if (!key && extracted.key) key = extracted.key;
+            if (capo === undefined && extracted.capo !== undefined) capo = extracted.capo;
+            if (!tempo && extracted.tempo) tempo = extracted.tempo;
+            if ((!metadata['time'] && !metadata['timesig']) && extracted.time) timeSignature = extracted.time;
+            if (!duration && extracted.duration) duration = extracted.duration;
+            if (!year && extracted.year) year = extracted.year;
+            if (!era && extracted.era) era = extracted.era;
+            // Settings comment is intentionally discarded from visible comments
+          } else {
+            parsedLines.push({ type: 'comment', text: value, raw: line });
+          }
           break;
         case 'start_of_chorus':
         case 'soc':
@@ -271,14 +552,40 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
           parsedLines.push({ type: 'bridge_end', raw: line });
           break;
         case 'start_of_tab':
+        case 'startoftab':
         case 'sot':
+        case 'tab':
+        case 'tab_start':
+        case 'tabstart':
+          if (inTab && currentTabLines.length > 0) {
+            parsedLines.push({
+              type: 'tab_start',
+              text: currentTabTitle,
+              tabLines: [...currentTabLines],
+              raw: '{end_of_tab}',
+            });
+            parsedLines.push({ type: 'tab_end', raw: '{end_of_tab}' });
+          }
           inTab = true;
-          parsedLines.push({ type: 'tab_start', raw: line });
+          currentTabTitle = value || '';
+          currentTabLines = [];
           break;
         case 'end_of_tab':
+        case 'endoftab':
         case 'eot':
+        case 'end_tab':
+        case 'endtab':
+        case 'tab_end':
+        case 'tabend':
           inTab = false;
+          parsedLines.push({
+            type: 'tab_start',
+            text: currentTabTitle,
+            tabLines: [...currentTabLines],
+            raw: line,
+          });
           parsedLines.push({ type: 'tab_end', raw: line });
+          currentTabLines = [];
           break;
         default:
           parsedLines.push({ type: 'directive', text: `${directive}: ${value}`, raw: line });
@@ -288,8 +595,47 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
     }
 
     if (inTab) {
-      parsedLines.push({ type: 'tab', text: line, raw: line });
+      // Ensure no blank lines between strings inside the tab section
+      if (line.trim().length > 0) {
+        currentTabLines.push(line);
+      }
       continue;
+    }
+
+    // Auto-detect guitar / bass / ukulele tablature blocks even without explicit {start_of_tab} tags
+    if (!inTab && isTabStringNotation(line)) {
+      const autoTabLines: string[] = [line];
+      let peekIdx = i + 1;
+      while (peekIdx < lines.length) {
+        const nextRaw = lines[peekIdx];
+        const nextTrim = nextRaw.trim();
+        if (!nextTrim) {
+          if (peekIdx + 1 < lines.length && isTabStringNotation(lines[peekIdx + 1])) {
+            peekIdx++;
+            continue;
+          } else {
+            break;
+          }
+        }
+        if (isTabStringNotation(nextRaw)) {
+          autoTabLines.push(nextRaw);
+          peekIdx++;
+        } else {
+          break;
+        }
+      }
+
+      if (autoTabLines.length >= 2) {
+        parsedLines.push({
+          type: 'tab_start',
+          text: '',
+          tabLines: autoTabLines,
+          raw: autoTabLines.join('\n'),
+        });
+        parsedLines.push({ type: 'tab_end', raw: '{end_of_tab}' });
+        i = peekIdx - 1;
+        continue;
+      }
     }
 
     // Parse lyrics line with embedded chords: e.g. [Am]Amazing [F]grace
@@ -348,6 +694,18 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
     }
   }
 
+  // Handle unclosed tab block at end of text
+  if (inTab && currentTabLines.length > 0) {
+    parsedLines.push({
+      type: 'tab_start',
+      text: currentTabTitle,
+      tabLines: [...currentTabLines],
+      raw: '',
+    });
+    parsedLines.push({ type: 'tab_end', raw: '' });
+    inTab = false;
+  }
+
   // Attempt to infer key from first chord if not specified
   if (!key) {
     for (const pl of parsedLines) {
@@ -378,6 +736,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
     artist,
     subtitle,
     key,
+    year,
     era,
     tempo,
     timeSignature,
@@ -1201,7 +1560,16 @@ export function reformatChordPro(chordProText: string): string {
     } else if (keyName === 'scrollspeed' || keyName === 'scroll_speed' || (keyName === 'meta' && /^scrollspeed/i.test(val))) {
       if (!scrollSpeed) scrollSpeed = val.replace(/^scrollspeed[\s:=]*/i, '').trim();
     } else if (keyName === 'comment' || keyName === 'c' || keyName === 'ci' || keyName === 'cb') {
-      if (isFromHeaderArea) {
+      if (isSettingsComment(val)) {
+        const extracted = extractSettingsFromCommentText(val);
+        if (!key && extracted.key) key = extracted.key;
+        if (capo === '' && extracted.capo !== undefined) capo = String(extracted.capo);
+        if (!tempo && extracted.tempo) tempo = String(extracted.tempo);
+        if (!time && extracted.time) time = extracted.time;
+        if (!duration && extracted.duration) duration = extracted.duration;
+        if (!year && extracted.year) year = extracted.year;
+        if (!era && extracted.era) era = extracted.era;
+      } else if (isFromHeaderArea) {
         headerComments.push(trimmedLine);
       }
     } else if (/^backtrack([1-5])$/i.test(keyName)) {
@@ -1240,6 +1608,11 @@ export function reformatChordPro(chordProText: string): string {
       keyName === 'define' || keyName === 'idefine' || keyName === 'd' ||
       /^backtrack[1-5]$/i.test(keyName)
     ) {
+      return true;
+    }
+
+    // Redundant settings comments anywhere in file should be absorbed to header settings
+    if ((keyName === 'comment' || keyName === 'c' || keyName === 'ci' || keyName === 'cb') && isSettingsComment(val)) {
       return true;
     }
 
@@ -1291,7 +1664,12 @@ export function reformatChordPro(chordProText: string): string {
   if (time) group1.push(`{time: ${time}}`);
   if (duration) group1.push(`{duration: ${duration}}`);
   if (scrollSpeed) group1.push(`{meta: ScrollSpeed : ${scrollSpeed}}`);
-  for (const c of headerComments) group1.push(c);
+  for (const c of headerComments) {
+    const inner = c.replace(/^\{\s*(?:comment|c|ci|cb)\s*:\s*|\}$/gi, '');
+    if (!isSettingsComment(inner)) {
+      group1.push(c);
+    }
+  }
   for (const om of otherHeaderMetas) group1.push(om);
 
   // Group 2: Backtracks 1..5 in order
@@ -1371,38 +1749,74 @@ export function moveChordInLine(
   line: string,
   chordName: string,
   targetChordIndexInLine: number | undefined,
-  newPos: number
+  newPos: number,
+  insertedChordName?: string
 ): string {
   const cleanName = chordName.trim().replace(/^\[|\]$/g, '');
-  if (!cleanName) return line;
+  const chordToInsert = insertedChordName ? insertedChordName.trim().replace(/^\[|\]$/g, '') : cleanName;
+  if (!cleanName && !chordToInsert) return line;
 
   let chordCount = 0;
   let removedStart = -1;
   let removedEnd = -1;
 
-  // First pass: locate and remove the targeted chord occurrence
+  // First pass: locate and index all existing chord brackets in this line
   const chordRegex = /\[([^\]]+)\]/g;
   let match: RegExpExecArray | null;
+  const allMatches: { index: number; length: number; inner: string; occurrence: number }[] = [];
   while ((match = chordRegex.exec(line)) !== null) {
-    if (targetChordIndexInLine !== undefined && targetChordIndexInLine >= 0) {
-      if (chordCount === targetChordIndexInLine) {
-        removedStart = match.index;
-        removedEnd = match.index + match[0].length;
-        break;
-      }
-    } else if (match[1] === cleanName) {
-      removedStart = match.index;
-      removedEnd = match.index + match[0].length;
-      break;
+    allMatches.push({
+      index: match.index,
+      length: match[0].length,
+      inner: match[1].trim(),
+      occurrence: chordCount++,
+    });
+  }
+
+  // 1. Target by occurrence index if specified
+  if (targetChordIndexInLine !== undefined && targetChordIndexInLine >= 0) {
+    const byIndex = allMatches.find((m) => m.occurrence === targetChordIndexInLine);
+    if (byIndex) {
+      removedStart = byIndex.index;
+      removedEnd = byIndex.index + byIndex.length;
     }
-    chordCount++;
   }
 
+  // 2. Fallback: match by chord name (exact or case-insensitive)
+  if (removedStart === -1 && cleanName) {
+    const byExactName = allMatches.find((m) => m.inner === cleanName);
+    if (byExactName) {
+      removedStart = byExactName.index;
+      removedEnd = byExactName.index + byExactName.length;
+    } else {
+      const byCaseName = allMatches.find(
+        (m) => m.inner.toLowerCase() === cleanName.toLowerCase()
+      );
+      if (byCaseName) {
+        removedStart = byCaseName.index;
+        removedEnd = byCaseName.index + byCaseName.length;
+      }
+    }
+  }
+
+  // 3. Fallback: if only 1 chord exists in the line, remove that one
+  if (removedStart === -1 && allMatches.length === 1) {
+    removedStart = allMatches[0].index;
+    removedEnd = allMatches[0].index + allMatches[0].length;
+  }
+
+  // 4. Fallback: if there are chords in the line, remove the first occurrence so we never duplicate
+  if (removedStart === -1 && allMatches.length > 0) {
+    removedStart = allMatches[0].index;
+    removedEnd = allMatches[0].index + allMatches[0].length;
+  }
+
+  // If absolutely no chord exists in the line, insert standard
   if (removedStart === -1) {
-    // If not found by index or name, fallback to standard insertion
-    return insertChordIntoLine(line, cleanName, newPos);
+    return insertChordIntoLine(line, chordToInsert, newPos);
   }
 
+  // Safely slice out the original chord
   const lineWithoutChord = line.slice(0, removedStart) + line.slice(removedEnd);
   const removedLength = removedEnd - removedStart;
 
@@ -1412,5 +1826,56 @@ export function moveChordInLine(
     adjustedPos = Math.max(removedStart, newPos - removedLength);
   }
 
-  return insertChordIntoLine(lineWithoutChord, cleanName, adjustedPos);
+  return insertChordIntoLine(lineWithoutChord, chordToInsert, adjustedPos);
+}
+
+/**
+ * Updates, replaces, or adds BackTrack metadata directives in raw ChordPro text.
+ * Canonical format: {meta: BackTrack{index} : {description} : {url} : }
+ */
+export function updateChordProBackTracks(rawChordPro: string, backtracks: BackTrackItem[]): string {
+  let lines = rawChordPro.split(/\r?\n/);
+  // Remove existing backtrack directives (both {meta: BackTrackX ...} and {BackTrackX: ...})
+  lines = lines.filter(line => {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return true;
+    if (/^\{\s*(?:meta\s*:\s*)?backtrack[1-5]\b/i.test(trimmed)) {
+      return false;
+    }
+    return true;
+  });
+
+  const validTracks = backtracks.filter(bt => bt && bt.url && bt.url.trim());
+  if (validTracks.length === 0) {
+    return lines.join('\n');
+  }
+
+  const newDirectives = validTracks.slice(0, 5).map((bt, i) => {
+    const idx = i + 1;
+    const desc = bt.description?.trim() || `BackTrack ${idx}`;
+    const url = bt.url.trim();
+    return `{meta: BackTrack${idx} : ${desc} : ${url} : }`;
+  });
+
+  // Find optimal insertion point in the header block (before defines or song body)
+  let insertIndex = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      const keyMatch = trimmed.match(/^\{\s*([a-zA-Z0-9_-]+)/);
+      const key = keyMatch ? keyMatch[1].toLowerCase() : '';
+      if (key === 'define' || key === 'idefine' || key === 'd') {
+        insertIndex = i;
+        break;
+      }
+      insertIndex = i + 1;
+    } else if (trimmed === '' && insertIndex > 0) {
+      break;
+    } else if (trimmed !== '') {
+      break;
+    }
+  }
+
+  lines.splice(insertIndex, 0, ...newDirectives);
+  return lines.join('\n');
 }
