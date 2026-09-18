@@ -5,6 +5,7 @@ export interface TabDiagramProps {
   lines: string[];
   className?: string;
   isAddChordMode?: boolean;
+  onEditTab?: () => void;
 }
 
 /**
@@ -20,14 +21,15 @@ export interface TabDiagramProps {
  * 3. Dynamic width scaling: scales font-size proportionally to container width
  *    to fit max width (number of dashes) while preserving readability.
  * 4. High-contrast white background and black text matching Tab Sample specification.
- * 5. Single combined section in both play mode and Chord Edit (+ Chord) mode.
- *    Chord Add/Move edit is cleanly disabled for TAB sections.
+ * 5. Compact vertical margins and padding to maximize song view area.
+ * 6. Interactive TAB Editor entry point in Add/Move Chord (+ Chord) mode.
  */
 export const TabDiagram: React.FC<TabDiagramProps> = ({ 
   title, 
   lines, 
   className = '', 
-  isAddChordMode = false 
+  isAddChordMode = false,
+  onEditTab,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -62,19 +64,19 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
   // Calculate optimal font size so all dashes fit within available width if possible
   let computedFontSize = 13;
   if (containerWidth > 0) {
-    // Inner padding is ~28px total (14px on each side)
-    const availableWidth = Math.max(containerWidth - 28, 180);
+    // Inner padding is ~20px total (10px on each side)
+    const availableWidth = Math.max(containerWidth - 20, 180);
     // Ideal font size to fit all characters in available width
     const idealFontSize = availableWidth / (maxLineLength * 0.615);
-    // Clamp font size between 9px (mobile readable floor) and 14px (desktop comfortable max)
-    computedFontSize = Math.max(9, Math.min(14, Math.floor(idealFontSize * 10) / 10));
+    // Clamp font size between 9px (mobile readable floor) and 13.5px (desktop comfortable max)
+    computedFontSize = Math.max(9, Math.min(13.5, Math.floor(idealFontSize * 10) / 10));
   }
 
   return (
     <div
       ref={containerRef}
-      className={`tab-diagram-container my-3 p-3.5 sm:p-4 bg-white text-black rounded-xl border border-slate-300 shadow-sm max-w-full overflow-x-auto select-all ${
-        isAddChordMode ? 'ring-2 ring-amber-400/80 shadow-md' : ''
+      className={`tab-diagram-container my-1.5 sm:my-2 p-2 sm:p-2.5 bg-white text-black rounded-lg border border-slate-300 shadow-xs max-w-full overflow-x-auto select-all ${
+        isAddChordMode ? 'ring-2 ring-amber-400 shadow-md cursor-pointer hover:ring-amber-500 transition-all' : ''
       } ${className}`}
       style={{
         backgroundColor: '#ffffff',
@@ -83,25 +85,36 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
       onClick={(e) => {
         if (isAddChordMode) {
           e.stopPropagation();
+          if (onEditTab) {
+            onEditTab();
+          }
         }
       }}
+      title={isAddChordMode ? 'Click to open TAB Editor' : undefined}
     >
-      {/* In Add/Move Chord mode: clear combined section banner and disabled notice */}
+      {/* In Add/Move Chord mode: clear combined section banner and edit button */}
       {isAddChordMode && (
-        <div className="flex flex-wrap items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-200 text-xs font-sans select-none">
+        <div className="flex flex-wrap items-center justify-between gap-1.5 pb-1 mb-1.5 border-b border-slate-200 text-xs font-sans select-none">
           <div className="flex items-center gap-1.5 font-bold text-slate-800">
-            <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
-            <span>TAB Combined Section (All strings unified)</span>
+            <span className="w-2 h-2 rounded-full bg-amber-500 inline-block animate-pulse" />
+            <span className="text-[11px] sm:text-xs">TAB Section</span>
           </div>
-          <span className="text-[11px] font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-300">
-            Chord Add/Move edit disabled for TAB
-          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onEditTab) onEditTab();
+            }}
+            className="text-[11px] font-bold text-amber-950 bg-amber-300 hover:bg-amber-400 active:bg-amber-500 px-2.5 py-0.5 rounded shadow-xs border border-amber-400 transition-colors flex items-center gap-1"
+          >
+            <span>✏️ Edit TAB</span>
+          </button>
         </div>
       )}
 
       {/* Tab Section Header Title */}
       {title && (
-        <div className="font-bold text-black text-sm sm:text-base mb-1.5 tracking-tight font-sans select-all leading-tight">
+        <div className="font-bold text-black text-xs sm:text-sm mb-1 tracking-tight font-sans select-all leading-tight">
           {title}
         </div>
       )}
@@ -114,7 +127,7 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
           fontVariantLigatures: 'none',
           fontFeatureSettings: '"liga" 0, "calt" 0, "dlig" 0',
           fontSize: `${computedFontSize}px`,
-          lineHeight: '1.26',
+          lineHeight: '1.20',
           letterSpacing: '0.04em',
           color: '#000000',
         }}

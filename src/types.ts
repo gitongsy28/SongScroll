@@ -104,6 +104,8 @@ export interface ViewerSettings {
   preferSharps: boolean;
   autoResumeAfterManualScroll: boolean;
   highlightCurrentSection: boolean;
+  instrument?: 'guitar' | 'ukulele' | 'bass';
+  measureInsertWidth?: number; // columns per newly added measure (default 20)
 }
 
 export interface MetronomeState {

@@ -60,6 +60,7 @@ import { ChordHint, ChordDiagramCard } from './ChordHint';
 import { BackTrackModal } from './BackTrackModal';
 import { BackTrackFloatingPlayer } from './BackTrackFloatingPlayer';
 import { TabDiagram } from './TabDiagram';
+import { TabEditorModal } from './TabEditorModal';
 
 interface SongViewerProps {
   song: Song;
@@ -131,6 +132,14 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const [insertChordName, setInsertChordName] = useState<string>('');
   const [insertCursorPos, setInsertCursorPos] = useState<number>(0);
   const lineInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Interactive TAB Diagram Editor state
+  const [tabEditorState, setTabEditorState] = useState<{
+    isOpen: boolean;
+    sourceLineIndex?: number;
+    tabTitle?: string;
+    tabLines: string[];
+  } | null>(null);
 
   // Auto-scroll state
   const [isScrolling, setIsScrolling] = useState<boolean>(false);
@@ -814,6 +823,75 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     setInsertCursorPos(0);
   };
 
+  // Open Interactive TAB Editor Modal
+  const handleOpenTabEditor = (tabTitle: string, tabLines: string[], lineIndex?: number) => {
+    setTabEditorState({
+      isOpen: true,
+      sourceLineIndex: lineIndex,
+      tabTitle,
+      tabLines,
+    });
+  };
+
+  // Save changes from Interactive TAB Editor Modal into raw ChordPro
+  const handleSaveTabFromEditor = (newLines: string[], newTitle?: string) => {
+    if (!tabEditorState) return;
+
+    setCurrentRawChordPro((prevRaw) => {
+      const rawLines = prevRaw.split(/\r?\n/);
+      let tabStartIdx = -1;
+      let tabEndIdx = -1;
+
+      // Find matching {start_of_tab...} to {end_of_tab} block
+      for (let i = 0; i < rawLines.length; i++) {
+        const trimmed = rawLines[i].trim().toLowerCase();
+        if (trimmed.startsWith('{start_of_tab') || trimmed.startsWith('{sot')) {
+          let endIdx = -1;
+          for (let j = i + 1; j < rawLines.length; j++) {
+            const jTrimmed = rawLines[j].trim().toLowerCase();
+            if (jTrimmed.startsWith('{end_of_tab') || jTrimmed.startsWith('{eot')) {
+              endIdx = j;
+              break;
+            }
+          }
+          if (endIdx !== -1) {
+            if (tabEditorState.tabLines && tabEditorState.tabLines.length > 0) {
+              const blockContent = rawLines.slice(i + 1, endIdx).join('\n');
+              const sampleLine = tabEditorState.tabLines[0]?.trim();
+              if (sampleLine && blockContent.includes(sampleLine)) {
+                tabStartIdx = i;
+                tabEndIdx = endIdx;
+                break;
+              }
+            }
+            if (tabStartIdx === -1) {
+              tabStartIdx = i;
+              tabEndIdx = endIdx;
+            }
+          }
+        }
+      }
+
+      const newBlockLines = [
+        newTitle ? `{start_of_tab: ${newTitle}}` : '{start_of_tab}',
+        ...newLines,
+        '{end_of_tab}',
+      ];
+
+      if (tabStartIdx !== -1 && tabEndIdx !== -1) {
+        rawLines.splice(tabStartIdx, tabEndIdx - tabStartIdx + 1, ...newBlockLines);
+        return rawLines.join('\n');
+      }
+
+      // If no existing tab block was found, append it nicely
+      rawLines.push('', ...newBlockLines);
+      return rawLines.join('\n');
+    });
+
+    setHasCustomChordChanges(true);
+    setTabEditorState(null);
+  };
+
   // Exit Check: has speed or custom chord changes
   const isWritableRepo = repoConfig?.sourceType === 'local-drive' || repoConfig?.sourceType === 'github-master';
   const hasSpeedDiff = hasManuallyChangedSpeed && (initialDefaultSpeed === undefined || scrollSpeed !== initialDefaultSpeed);
@@ -1412,6 +1490,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 displayMode={displayMode}
                 customChords={songCustomChords}
                 isAddChordMode={isAddChordMode}
+                onEditTab={handleOpenTabEditor}
                 onChordClick={(chord, context) => {
                   if (isAddChordMode) {
                     // Selecting a specific chord while Add Chord mode is active switches directly to Move Chord!
@@ -1832,6 +1911,56 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             </div>
           </div>
 
+          {/* TAB & Instrument Settings */}
+          <div className="p-3 rounded-xl border bg-slate-950/70 border-slate-800 space-y-2.5">
+            <div className="text-slate-100 font-bold flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5">
+                <Guitar className="w-3.5 h-3.5 text-amber-400" />
+                <span>TAB & Instrument Preset</span>
+              </span>
+            </div>
+
+            {/* Instrument Tuning Selection */}
+            <div className="space-y-1">
+              <span className="text-[11px] text-slate-400">Instrument Strings:</span>
+              <div className="grid grid-cols-3 gap-1">
+                {(['guitar', 'ukulele', 'bass'] as const).map((inst) => (
+                  <button
+                    key={inst}
+                    type="button"
+                    onClick={() => onUpdateSettings({ instrument: inst })}
+                    className={`py-1 px-1.5 rounded-lg text-center font-bold text-[11px] border capitalize transition-colors ${
+                      (settings.instrument || 'guitar') === inst
+                        ? 'bg-amber-400 text-slate-950 border-amber-300'
+                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
+                    }`}
+                  >
+                    {inst}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Measure Insert Width */}
+            <div className="space-y-1 pt-1.5 border-t border-slate-800/80">
+              <div className="flex justify-between text-slate-300 text-[11px]">
+                <span>Measure Insert Width:</span>
+                <span className="font-mono text-amber-400 font-bold">{settings.measureInsertWidth || 20} cols</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="8"
+                  max="40"
+                  step="1"
+                  value={settings.measureInsertWidth || 20}
+                  onChange={(e) => onUpdateSettings({ measureInsertWidth: parseInt(e.target.value, 10) })}
+                  className="flex-1 accent-amber-400"
+                />
+              </div>
+            </div>
+          </div>
+
           {/* Column Mode & Fullscreen */}
           <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800">
             <button
@@ -2208,6 +2337,19 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         onClose={() => setActiveFloatingTrack(null)}
         onOpenInBrowser={handleOpenBackTrackInBrowser}
       />
+
+      {/* Interactive TAB Diagram Grid Editor Modal */}
+      {tabEditorState && (
+        <TabEditorModal
+          isOpen={tabEditorState.isOpen}
+          onClose={() => setTabEditorState(null)}
+          onSave={handleSaveTabFromEditor}
+          initialTitle={tabEditorState.tabTitle}
+          initialLines={tabEditorState.tabLines}
+          instrument={settings.instrument || 'guitar'}
+          measureInsertWidth={settings.measureInsertWidth || 20}
+        />
+      )}
     </div>
   );
 };
@@ -2316,6 +2458,7 @@ interface RenderLineProps {
   displayMode: DisplayMode;
   customChords?: Record<string, ChordVoicing>;
   isAddChordMode?: boolean;
+  onEditTab?: (tabTitle: string, tabLines: string[], lineIndex?: number) => void;
   onChordClick: (
     chord: string,
     context?: { 
@@ -2340,6 +2483,7 @@ const RenderLine: React.FC<RenderLineProps> = ({
   displayMode,
   customChords,
   isAddChordMode,
+  onEditTab,
   onChordClick,
   onLineClick,
 }) => {
@@ -2405,6 +2549,7 @@ const RenderLine: React.FC<RenderLineProps> = ({
         title={tabTitle}
         lines={tabLines}
         isAddChordMode={isAddChordMode}
+        onEditTab={() => onEditTab?.(tabTitle, tabLines, lineIndex)}
       />
     );
   }

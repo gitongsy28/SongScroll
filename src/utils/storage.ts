@@ -26,6 +26,8 @@ export const DEFAULT_VIEWER_SETTINGS: ViewerSettings = {
   preferSharps: true,
   autoResumeAfterManualScroll: true,
   highlightCurrentSection: true,
+  instrument: 'guitar',
+  measureInsertWidth: 20,
 };
 
 export const DEFAULT_REPO_CONFIG: RepositoryConfig = {

@@ -476,11 +476,11 @@ export const ChordEditorModal: React.FC<ChordEditorModalProps> = ({
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => handleInsertDirective('{meta: ScrollPauseSec : 8}')}
+              onClick={() => handleInsertDirective('{pause: 8}')}
               className="px-2 py-1 bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 rounded font-mono shrink-0 font-semibold"
-              title="Pause scroll for N seconds (at 2/3 window height) for guitar lead/solo"
+              title="Pause scroll for N seconds (at 2/3 window height) for guitar lead/solo (standard ChordPro)"
             >
-              {'{ScrollPauseSec : 8}'}
+              {'{pause: 8}'}
             </button>
             <button
               type="button"

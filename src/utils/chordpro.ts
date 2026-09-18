@@ -467,7 +467,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
               if (bt) {
                 backtracksMap.set(bt.index, bt);
               }
-            } else if (normKey === 'scrollpausesec' || normKey === 'scroll_pause_sec' || normKey === 'scrollpause') {
+            } else if (normKey === 'pause' || normKey === 'scrollpausesec' || normKey === 'scroll_pause_sec' || normKey === 'scrollpause') {
               const pauseNum = parseFloat(metaVal.replace(/^[:\s=]+/, ''));
               parsedLines.push({
                 type: 'scroll_pause',
@@ -478,6 +478,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
           }
           break;
         }
+        case 'pause':
         case 'scrollpausesec':
         case 'scroll_pause_sec':
         case 'scrollpause': {
@@ -794,8 +795,16 @@ export function serializeChordPro(parsed: ParsedChordPro, transposeSemitones: nu
       case 'bridge_end':
         result.push('{end_of_bridge}');
         break;
+      case 'scroll_pause':
+        result.push(`{pause: ${line.pauseSeconds || 8}}`);
+        break;
       case 'tab_start':
-        result.push('{start_of_tab}');
+        result.push(line.text ? `{start_of_tab: ${line.text}}` : '{start_of_tab}');
+        if (line.tabLines && line.tabLines.length > 0) {
+          for (const tl of line.tabLines) {
+            result.push(tl);
+          }
+        }
         break;
       case 'tab_end':
         result.push('{end_of_tab}');
@@ -1479,7 +1488,8 @@ export function reformatChordPro(chordProText: string): string {
       directiveKey === 'start_of_bridge' || directiveKey === 'sob' ||
       directiveKey === 'start_of_tab' || directiveKey === 'sot' ||
       directiveKey === 'start_of_grid' || directiveKey === 'sog' ||
-      (directiveKey === 'meta' && /scrollpausesec/i.test(directiveVal)) ||
+      directiveKey === 'pause' ||
+      (directiveKey === 'meta' && /scrollpausesec|pause/i.test(directiveVal)) ||
       directiveKey === 'scrollpausesec' || directiveKey === 'scroll_pause_sec'
     ) {
       songStartIndex = i;
@@ -1616,9 +1626,13 @@ export function reformatChordPro(chordProText: string): string {
       return true;
     }
 
+    if (keyName === 'pause') {
+      return false; // Stay in song body!
+    }
+
     // Meta directives: check if scrollspeed, year, era, backtrack, etc. (do NOT extract scrollpause!)
     if (keyName === 'meta') {
-      if (/scrollpausesec|scroll_pause/i.test(val)) {
+      if (/scrollpausesec|scroll_pause|pause/i.test(val)) {
         return false; // Stay in song body!
       }
       return true; // ScrollSpeed, BackTrack, Era, Year, etc. -> extract to header!
