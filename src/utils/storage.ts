@@ -28,6 +28,7 @@ export const DEFAULT_VIEWER_SETTINGS: ViewerSettings = {
   highlightCurrentSection: true,
   instrument: 'guitar',
   measureInsertWidth: 20,
+  tabWrapMode: 'fit',
 };
 
 export const DEFAULT_REPO_CONFIG: RepositoryConfig = {

@@ -106,6 +106,7 @@ export interface ViewerSettings {
   highlightCurrentSection: boolean;
   instrument?: 'guitar' | 'ukulele' | 'bass';
   measureInsertWidth?: number; // columns per newly added measure (default 20)
+  tabWrapMode?: 'fit' | 'wrap'; // Scale to fit width vs Wrap measures onto next row
 }
 
 export interface MetronomeState {

@@ -837,59 +837,93 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const handleSaveTabFromEditor = (newLines: string[], newTitle?: string) => {
     if (!tabEditorState) return;
 
-    setCurrentRawChordPro((prevRaw) => {
-      const rawLines = prevRaw.split(/\r?\n/);
-      let tabStartIdx = -1;
-      let tabEndIdx = -1;
+    const originalLines = tabEditorState.tabLines || [];
+    const rawLines = currentRawChordPro.split(/\r?\n/);
 
-      // Find matching {start_of_tab...} to {end_of_tab} block
-      for (let i = 0; i < rawLines.length; i++) {
-        const trimmed = rawLines[i].trim().toLowerCase();
-        if (trimmed.startsWith('{start_of_tab') || trimmed.startsWith('{sot')) {
-          let endIdx = -1;
-          for (let j = i + 1; j < rawLines.length; j++) {
-            const jTrimmed = rawLines[j].trim().toLowerCase();
-            if (jTrimmed.startsWith('{end_of_tab') || jTrimmed.startsWith('{eot')) {
-              endIdx = j;
+    const newBlockLines = [
+      newTitle ? `{start_of_tab: ${newTitle}}` : '{start_of_tab}',
+      ...newLines,
+      '{end_of_tab}',
+    ];
+
+    let tabStartIdx = -1;
+    let tabEndIdx = -1;
+
+    // 1. Find matching {start_of_tab...} to {end_of_tab} block
+    for (let i = 0; i < rawLines.length; i++) {
+      const trimmed = rawLines[i].trim().toLowerCase();
+      if (trimmed.startsWith('{start_of_tab') || trimmed.startsWith('{sot')) {
+        let endIdx = -1;
+        for (let j = i + 1; j < rawLines.length; j++) {
+          const jTrimmed = rawLines[j].trim().toLowerCase();
+          if (jTrimmed.startsWith('{end_of_tab') || jTrimmed.startsWith('{eot')) {
+            endIdx = j;
+            break;
+          }
+        }
+        if (endIdx !== -1) {
+          if (originalLines.length > 0) {
+            const blockContent = rawLines.slice(i + 1, endIdx).join('\n');
+            const sampleLine = originalLines[0]?.trim();
+            if (sampleLine && blockContent.includes(sampleLine)) {
+              tabStartIdx = i;
+              tabEndIdx = endIdx;
               break;
             }
           }
-          if (endIdx !== -1) {
-            if (tabEditorState.tabLines && tabEditorState.tabLines.length > 0) {
-              const blockContent = rawLines.slice(i + 1, endIdx).join('\n');
-              const sampleLine = tabEditorState.tabLines[0]?.trim();
-              if (sampleLine && blockContent.includes(sampleLine)) {
-                tabStartIdx = i;
-                tabEndIdx = endIdx;
-                break;
-              }
-            }
-            if (tabStartIdx === -1) {
-              tabStartIdx = i;
-              tabEndIdx = endIdx;
-            }
+          if (tabStartIdx === -1) {
+            tabStartIdx = i;
+            tabEndIdx = endIdx;
           }
         }
       }
+    }
 
-      const newBlockLines = [
-        newTitle ? `{start_of_tab: ${newTitle}}` : '{start_of_tab}',
-        ...newLines,
-        '{end_of_tab}',
-      ];
-
-      if (tabStartIdx !== -1 && tabEndIdx !== -1) {
-        rawLines.splice(tabStartIdx, tabEndIdx - tabStartIdx + 1, ...newBlockLines);
-        return rawLines.join('\n');
+    // 2. If not inside explicit {start_of_tab} block, find matching raw tablature lines
+    if (tabStartIdx === -1 && originalLines.length > 0) {
+      const firstTarget = originalLines[0]?.trim();
+      for (let i = 0; i < rawLines.length; i++) {
+        if (rawLines[i].trim() === firstTarget) {
+          tabStartIdx = i;
+          let matchCount = 1;
+          while (
+            matchCount < originalLines.length &&
+            i + matchCount < rawLines.length &&
+            rawLines[i + matchCount].trim() === originalLines[matchCount]?.trim()
+          ) {
+            matchCount++;
+          }
+          tabEndIdx = i + matchCount - 1;
+          break;
+        }
       }
+    }
 
-      // If no existing tab block was found, append it nicely
+    let nextRaw = '';
+    if (tabStartIdx !== -1 && tabEndIdx !== -1) {
+      rawLines.splice(tabStartIdx, tabEndIdx - tabStartIdx + 1, ...newBlockLines);
+      nextRaw = rawLines.join('\n');
+    } else {
       rawLines.push('', ...newBlockLines);
-      return rawLines.join('\n');
-    });
+      nextRaw = rawLines.join('\n');
+    }
 
+    setCurrentRawChordPro(nextRaw);
     setHasCustomChordChanges(true);
     setTabEditorState(null);
+
+    // Save directly to song storage so changes are never lost
+    if (onSaveSong) {
+      const updatedParsed = parseChordPro(nextRaw);
+      updatedParsed.customChords = { ...updatedParsed.customChords, ...songCustomChords };
+      const updatedSong: Song = {
+        ...song,
+        rawChordPro: nextRaw,
+        parsed: updatedParsed,
+        updatedAt: Date.now(),
+      };
+      onSaveSong(updatedSong);
+    }
   };
 
   // Exit Check: has speed or custom chord changes
@@ -1490,6 +1524,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 displayMode={displayMode}
                 customChords={songCustomChords}
                 isAddChordMode={isAddChordMode}
+                tabWrapMode={settings.tabWrapMode || 'fit'}
                 onEditTab={handleOpenTabEditor}
                 onChordClick={(chord, context) => {
                   if (isAddChordMode) {
@@ -1672,7 +1707,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                   onSelect={handleLineCursorEvent}
                   onPointerUp={handleLineCursorEvent}
                   rows={2}
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 focus:border-amber-400 focus:ring-1 focus:ring-amber-400 rounded-xl text-slate-100 font-mono text-sm leading-relaxed cursor-text resize-none focus:outline-none select-text"
+                  className="w-full px-3 py-2 bg-white border border-slate-300 focus:border-amber-500 focus:ring-1 focus:ring-amber-500 rounded-xl text-black font-mono text-sm leading-relaxed cursor-text resize-none focus:outline-none select-text shadow-xs"
                   placeholder="(Empty line)"
                 />
               </div>
@@ -1684,16 +1719,16 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             </div>
 
             {/* Live Line Preview */}
-            <div className="p-3 bg-slate-950/90 border border-slate-800 rounded-xl space-y-1">
+            <div className="p-3 bg-white border border-slate-300 rounded-xl space-y-1 shadow-xs">
               <div className="flex items-center justify-between text-[11px] font-bold">
-                <span className={insertChordModal.mode === 'move' ? 'text-sky-400' : 'text-amber-400'}>Resulting Line Preview:</span>
-                <span className="text-slate-400 font-mono text-[10px]">
+                <span className={insertChordModal.mode === 'move' ? 'text-sky-800' : 'text-amber-800'}>Resulting Line Preview:</span>
+                <span className="text-slate-500 font-mono text-[10px]">
                   Cursor at pos {insertCursorPos} of {targetLineText.length}
                 </span>
               </div>
-              <div className="font-mono text-xs text-slate-200 overflow-x-auto whitespace-pre py-0.5">
+              <div className="font-mono text-xs text-black overflow-x-auto whitespace-pre py-0.5">
                 {insertChordModal.mode === 'move' ? (
-                  <span className="text-slate-300">
+                  <span className="text-black font-medium">
                     {moveChordInLine(
                       targetLineText,
                       insertChordModal.rawChord || insertChordName.trim().replace(/^\[|\]$/g, '') || '?',
@@ -1704,11 +1739,11 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                   </span>
                 ) : (
                   <>
-                    <span className="text-slate-300">{targetLineText.slice(0, insertCursorPos)}</span>
+                    <span className="text-black font-medium">{targetLineText.slice(0, insertCursorPos)}</span>
                     <span className="inline-block px-1.5 py-0.2 bg-amber-400 text-slate-950 font-bold rounded shadow-sm">
                       [{insertChordName.trim().replace(/^\[|\]$/g, '') || '?'}]
                     </span>
-                    <span className="text-slate-300">{targetLineText.slice(insertCursorPos)}</span>
+                    <span className="text-black font-medium">{targetLineText.slice(insertCursorPos)}</span>
                   </>
                 )}
               </div>
@@ -1957,6 +1992,37 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                   onChange={(e) => onUpdateSettings({ measureInsertWidth: parseInt(e.target.value, 10) })}
                   className="flex-1 accent-amber-400"
                 />
+              </div>
+            </div>
+
+            {/* TAB Wrap-Around vs. Resizing Mode Toggle */}
+            <div className="space-y-1 pt-1.5 border-t border-slate-800/80">
+              <span className="text-[11px] text-slate-400 block">TAB Layout Mode:</span>
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ tabWrapMode: 'fit' })}
+                  className={`py-1 px-1.5 rounded-lg text-center font-bold text-[11px] border transition-colors cursor-pointer ${
+                    (settings.tabWrapMode || 'fit') === 'fit'
+                      ? 'bg-amber-400 text-slate-950 border-amber-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
+                  }`}
+                  title="Auto-scales the TAB diagram to fit container width without breaking lines"
+                >
+                  Resize to Fit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ tabWrapMode: 'wrap' })}
+                  className={`py-1 px-1.5 rounded-lg text-center font-bold text-[11px] border transition-colors cursor-pointer ${
+                    settings.tabWrapMode === 'wrap'
+                      ? 'bg-amber-400 text-slate-950 border-amber-300'
+                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
+                  }`}
+                  title="Wraps measures across multiple lines when exceeding container width"
+                >
+                  Wrap Measures
+                </button>
               </div>
             </div>
           </div>
@@ -2458,6 +2524,7 @@ interface RenderLineProps {
   displayMode: DisplayMode;
   customChords?: Record<string, ChordVoicing>;
   isAddChordMode?: boolean;
+  tabWrapMode?: 'fit' | 'wrap';
   onEditTab?: (tabTitle: string, tabLines: string[], lineIndex?: number) => void;
   onChordClick: (
     chord: string,
@@ -2483,6 +2550,7 @@ const RenderLine: React.FC<RenderLineProps> = ({
   displayMode,
   customChords,
   isAddChordMode,
+  tabWrapMode,
   onEditTab,
   onChordClick,
   onLineClick,
@@ -2549,6 +2617,7 @@ const RenderLine: React.FC<RenderLineProps> = ({
         title={tabTitle}
         lines={tabLines}
         isAddChordMode={isAddChordMode}
+        tabWrapMode={tabWrapMode}
         onEditTab={() => onEditTab?.(tabTitle, tabLines, lineIndex)}
       />
     );

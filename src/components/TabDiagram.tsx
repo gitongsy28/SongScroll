@@ -6,6 +6,7 @@ export interface TabDiagramProps {
   className?: string;
   isAddChordMode?: boolean;
   onEditTab?: () => void;
+  tabWrapMode?: 'fit' | 'wrap';
 }
 
 /**
@@ -13,16 +14,9 @@ export interface TabDiagramProps {
  * Renders ChordPro {start_of_tab} ... {end_of_tab} blocks as a unified,
  * single-section diagram with a pure white background and crisp black lines/text.
  *
- * Key Design & Usability features:
- * 1. Monospaced font with disabled ligatures & calibrated letter-spacing so
- *    dashes (------) have visible breaks between characters for column alignment.
- * 2. No blank lines between string rows (works dynamically for 6-string guitar,
- *    4-string ukulele, bass, etc.).
- * 3. Dynamic width scaling: scales font-size proportionally to container width
- *    to fit max width (number of dashes) while preserving readability.
- * 4. High-contrast white background and black text matching Tab Sample specification.
- * 5. Compact vertical margins and padding to maximize song view area.
- * 6. Interactive TAB Editor entry point in Add/Move Chord (+ Chord) mode.
+ * Supports both:
+ * - 'fit': Proportional auto-scaling to fit the full line width
+ * - 'wrap': Measure wrapping into multi-row string systems when wide
  */
 export const TabDiagram: React.FC<TabDiagramProps> = ({ 
   title, 
@@ -30,6 +24,7 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
   className = '', 
   isAddChordMode = false,
   onEditTab,
+  tabWrapMode = 'fit',
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState<number>(0);
@@ -57,18 +52,45 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
 
   if (cleanLines.length === 0 && !title) return null;
 
+  // Helper to parse line into [stringLabel, measureContents[]]
+  // e.g. "e|-----|-----|" -> label: "e", measures: ["-----", "-----"]
+  const parsedMeasuresByLine = cleanLines.map((line) => {
+    const pipeIdx = line.indexOf('|');
+    if (pipeIdx === -1) return { label: '', measures: [line] };
+    const label = line.slice(0, pipeIdx);
+    const rest = line.slice(pipeIdx + 1);
+    // split by '|' while ignoring trailing empty split
+    const parts = rest.split('|');
+    if (parts.length > 1 && parts[parts.length - 1] === '') {
+      parts.pop();
+    }
+    return { label, measures: parts };
+  });
+
+  const numMeasures = parsedMeasuresByLine[0]?.measures.length || 1;
+  const canWrap = tabWrapMode === 'wrap' && numMeasures > 1 && parsedMeasuresByLine.every(p => p.measures.length === numMeasures);
+
+  // If wrapping is enabled, group measures so that each group fits within container
+  let wrappedGroups: string[][] = [];
+  if (canWrap) {
+    // For each measure index m, build the block of strings
+    // e.g. measure m = lines with `label|measures[m]|`
+    for (let m = 0; m < numMeasures; m++) {
+      const measureLines = parsedMeasuresByLine.map((p) => `${p.label}|${p.measures[m]}|`);
+      wrappedGroups.push(measureLines);
+    }
+  }
+
   // Find maximum characters per line in this tab section
-  const maxLineLength = Math.max(...cleanLines.map((l) => l.length), 32);
+  const maxLineLength = canWrap 
+    ? Math.max(...wrappedGroups.flatMap(g => g.map(l => l.length)), 24)
+    : Math.max(...cleanLines.map((l) => l.length), 32);
 
   // Character width ratio in Consolas/monospace with ~0.04em letter-spacing is roughly 0.615
-  // Calculate optimal font size so all dashes fit within available width if possible
   let computedFontSize = 13;
   if (containerWidth > 0) {
-    // Inner padding is ~20px total (10px on each side)
     const availableWidth = Math.max(containerWidth - 20, 180);
-    // Ideal font size to fit all characters in available width
     const idealFontSize = availableWidth / (maxLineLength * 0.615);
-    // Clamp font size between 9px (mobile readable floor) and 13.5px (desktop comfortable max)
     computedFontSize = Math.max(9, Math.min(13.5, Math.floor(idealFontSize * 10) / 10));
   }
 
@@ -120,20 +142,48 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
       )}
 
       {/* Tab Strings Block */}
-      <pre
-        className="tab-diagram-pre text-black whitespace-pre m-0 p-0 font-medium select-all"
-        style={{
-          fontFamily: 'Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace',
-          fontVariantLigatures: 'none',
-          fontFeatureSettings: '"liga" 0, "calt" 0, "dlig" 0',
-          fontSize: `${computedFontSize}px`,
-          lineHeight: '1.20',
-          letterSpacing: '0.04em',
-          color: '#000000',
-        }}
-      >
-        {cleanLines.join('\n')}
-      </pre>
+      {canWrap ? (
+        <div className="space-y-2">
+          {wrappedGroups.map((group, gIdx) => (
+            <div key={gIdx} className="overflow-x-auto">
+              {numMeasures > 1 && (
+                <div className="text-[10px] font-sans font-semibold text-slate-500 mb-0.5">
+                  Measure {gIdx + 1}
+                </div>
+              )}
+              <pre
+                className="tab-diagram-pre text-black whitespace-pre m-0 p-0 font-medium select-all"
+                style={{
+                  fontFamily: 'Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace',
+                  fontVariantLigatures: 'none',
+                  fontFeatureSettings: '"liga" 0, "calt" 0, "dlig" 0',
+                  fontSize: `${computedFontSize}px`,
+                  lineHeight: '1.20',
+                  letterSpacing: '0.04em',
+                  color: '#000000',
+                }}
+              >
+                {group.join('\n')}
+              </pre>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <pre
+          className="tab-diagram-pre text-black whitespace-pre m-0 p-0 font-medium select-all"
+          style={{
+            fontFamily: 'Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace',
+            fontVariantLigatures: 'none',
+            fontFeatureSettings: '"liga" 0, "calt" 0, "dlig" 0',
+            fontSize: `${computedFontSize}px`,
+            lineHeight: '1.20',
+            letterSpacing: '0.04em',
+            color: '#000000',
+          }}
+        >
+          {cleanLines.join('\n')}
+        </pre>
+      )}
     </div>
   );
 };
