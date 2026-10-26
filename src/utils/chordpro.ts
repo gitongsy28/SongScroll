@@ -462,7 +462,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
               year = metaVal;
             } else if (normKey === 'era' || normKey === 'decade') {
               era = metaVal;
-            } else if (/^backtrack([1-5])$/.test(normKey)) {
+            } else if (/^backtrack([1-9]|10)$/.test(normKey)) {
               const bt = parseBackTrackEntry(metaKey, metaVal, line);
               if (bt) {
                 backtracksMap.set(bt.index, bt);
@@ -503,7 +503,12 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
         case 'backtrack2':
         case 'backtrack3':
         case 'backtrack4':
-        case 'backtrack5': {
+        case 'backtrack5':
+        case 'backtrack6':
+        case 'backtrack7':
+        case 'backtrack8':
+        case 'backtrack9':
+        case 'backtrack10': {
           const bt = parseBackTrackEntry(directive, value, line);
           if (bt) {
             backtracksMap.set(bt.index, bt);
@@ -639,17 +644,33 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
       }
     }
 
+    // Check if line begins with standard LRC timestamp: [mm:ss.xx] or [mm:ss]
+    let lineToParse = line;
+    let lineTimestamp: string | undefined;
+    let lineTimeSeconds: number | undefined;
+
+    const lrcMatch = line.match(/^\[(\d{1,2}):(\d{2}(?:\.\d{1,3})?)\]/);
+    if (lrcMatch) {
+      lineTimestamp = lrcMatch[0];
+      const mins = parseInt(lrcMatch[1], 10);
+      const secs = parseFloat(lrcMatch[2]);
+      lineTimeSeconds = mins * 60 + secs;
+      lineToParse = line.slice(lineTimestamp.length);
+    }
+
     // Parse lyrics line with embedded chords: e.g. [Am]Amazing [F]grace
     const segments: ChordSegment[] = [];
     let currentIndex = 0;
-    const chordMatches = [...line.matchAll(/\[([^\]]+)\]/g)];
+    const chordMatches = [...lineToParse.matchAll(/\[([^\]]+)\]/g)];
 
     if (chordMatches.length === 0) {
       // Plain lyric line or text
       parsedLines.push({
         type: 'lyrics',
-        segments: [{ lyrics: line }],
+        segments: [{ lyrics: lineToParse }],
         raw: line,
+        timestamp: lineTimestamp,
+        timeSeconds: lineTimeSeconds,
       });
       continue;
     }
@@ -661,7 +682,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
 
       // Lyrics before this chord (if at the start of line)
       if (matchIndex > currentIndex) {
-        const precedingLyrics = line.slice(currentIndex, matchIndex);
+        const precedingLyrics = lineToParse.slice(currentIndex, matchIndex);
         if (segments.length === 0) {
           segments.push({ lyrics: precedingLyrics });
         } else {
@@ -672,8 +693,8 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
       // Next lyrics belong to this chord until next chord or end of line
       const nextMatch = chordMatches[m + 1];
       const chordEnd = matchIndex + match[0].length;
-      const lyricsEnd = nextMatch ? nextMatch.index! : line.length;
-      const trailingLyrics = line.slice(chordEnd, lyricsEnd);
+      const lyricsEnd = nextMatch ? nextMatch.index! : lineToParse.length;
+      const trailingLyrics = lineToParse.slice(chordEnd, lyricsEnd);
 
       segments.push({
         chord: chordText,
@@ -688,6 +709,8 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
       type: 'lyrics',
       segments,
       raw: line,
+      timestamp: lineTimestamp,
+      timeSeconds: lineTimeSeconds,
     });
 
     for (let k = prevParsedCount; k < parsedLines.length; k++) {
@@ -814,7 +837,7 @@ export function serializeChordPro(parsed: ParsedChordPro, transposeSemitones: nu
         break;
       case 'lyrics':
         if (line.segments) {
-          let lineStr = '';
+          let lineStr = line.timestamp || '';
           for (const seg of line.segments) {
             if (seg.chord) {
               const tc = transposeChord(seg.chord, transposeSemitones, preferSharps);
@@ -1215,7 +1238,7 @@ export function generateSummaryLines(lines: ChordProLine[]): ChordProLine[] {
  * Parses a BackTrack metadata entry (e.g. key="BackTrack1", value="Babe BackTrack No Vocal : https://www.youtube.com/watch?v=sBRkqQhUERY : ")
  */
 export function parseBackTrackEntry(key: string, value: string, rawLine?: string): BackTrackItem | null {
-  const keyMatch = key.match(/^backtrack([1-5])$/i);
+  const keyMatch = key.match(/^backtrack([1-9]|10)$/i);
   if (!keyMatch) return null;
   const index = parseInt(keyMatch[1], 10);
 
@@ -1582,11 +1605,11 @@ export function reformatChordPro(chordProText: string): string {
       } else if (isFromHeaderArea) {
         headerComments.push(trimmedLine);
       }
-    } else if (/^backtrack([1-5])$/i.test(keyName)) {
+    } else if (/^backtrack([1-9]|10)$/i.test(keyName)) {
       const idx = parseInt(keyName.replace(/backtrack/i, ''), 10);
       backtracksMap.set(idx, trimmedLine);
-    } else if (keyName === 'meta' && /^backtrack([1-5])/i.test(val)) {
-      const idxMatch = val.match(/^backtrack([1-5])/i);
+    } else if (keyName === 'meta' && /^backtrack([1-9]|10)/i.test(val)) {
+      const idxMatch = val.match(/^backtrack([1-9]|10)/i);
       const idx = idxMatch ? parseInt(idxMatch[1], 10) : 1;
       backtracksMap.set(idx, trimmedLine);
     } else if (keyName === 'define' || keyName === 'idefine' || keyName === 'd') {
@@ -1616,7 +1639,7 @@ export function reformatChordPro(chordProText: string): string {
       keyName === 'duration' ||
       keyName === 'scrollspeed' || keyName === 'scroll_speed' ||
       keyName === 'define' || keyName === 'idefine' || keyName === 'd' ||
-      /^backtrack[1-5]$/i.test(keyName)
+      /^backtrack([1-9]|10)$/i.test(keyName)
     ) {
       return true;
     }
@@ -1686,9 +1709,9 @@ export function reformatChordPro(chordProText: string): string {
   }
   for (const om of otherHeaderMetas) group1.push(om);
 
-  // Group 2: Backtracks 1..5 in order
+  // Group 2: Backtracks 1..10 in order
   const group2: string[] = [];
-  for (let b = 1; b <= 5; b++) {
+  for (let b = 1; b <= 10; b++) {
     if (backtracksMap.has(b)) {
       group2.push(backtracksMap.get(b)!);
     }
@@ -1853,7 +1876,7 @@ export function updateChordProBackTracks(rawChordPro: string, backtracks: BackTr
   lines = lines.filter(line => {
     const trimmed = line.trim();
     if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return true;
-    if (/^\{\s*(?:meta\s*:\s*)?backtrack[1-5]\b/i.test(trimmed)) {
+    if (/^\{\s*(?:meta\s*:\s*)?backtrack([1-9]|10)\b/i.test(trimmed)) {
       return false;
     }
     return true;
@@ -1864,7 +1887,7 @@ export function updateChordProBackTracks(rawChordPro: string, backtracks: BackTr
     return lines.join('\n');
   }
 
-  const newDirectives = validTracks.slice(0, 5).map((bt, i) => {
+  const newDirectives = validTracks.slice(0, 10).map((bt, i) => {
     const idx = i + 1;
     const desc = bt.description?.trim() || `BackTrack ${idx}`;
     const url = bt.url.trim();

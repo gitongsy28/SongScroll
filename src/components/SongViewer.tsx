@@ -89,10 +89,49 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const [transposeOffset, setTransposeOffset] = useState<number>(0);
   const [preferSharps, setPreferSharps] = useState<boolean>(settings.preferSharps ?? true);
   
-  // 3 Display Modes: 'summary' | 'normal' | 'detailed' (Default: 'normal')
-  const [displayMode, setDisplayMode] = useState<DisplayMode>(
-    initialSummaryMode ? 'summary' : 'normal'
+  // Feature-by-feature Display Toggles:
+  // [D] Chord Diagram, [T] TAB Diagram, [C] Chord Name, [S] Summary Only
+  const [showChordDiagrams, setShowChordDiagrams] = useState<boolean>(settings.showChordDiagrams ?? true);
+  const [showTabDiagrams, setShowTabDiagrams] = useState<boolean>(settings.showTabDiagrams ?? true);
+  const [showChordNames, setShowChordNames] = useState<boolean>(settings.showChordNames ?? true);
+  const [showSummaryOnly, setShowSummaryOnly] = useState<boolean>(
+    initialSummaryMode || (settings.showSummaryOnly ?? false)
   );
+
+  const toggleChordDiagrams = useCallback(() => {
+    setShowChordDiagrams((prev) => {
+      const next = !prev;
+      if (showSummaryOnly) setShowSummaryOnly(false);
+      onUpdateSettings({ showChordDiagrams: next, showSummaryOnly: false });
+      return next;
+    });
+  }, [showSummaryOnly, onUpdateSettings]);
+
+  const toggleTabDiagrams = useCallback(() => {
+    setShowTabDiagrams((prev) => {
+      const next = !prev;
+      if (showSummaryOnly) setShowSummaryOnly(false);
+      onUpdateSettings({ showTabDiagrams: next, showSummaryOnly: false });
+      return next;
+    });
+  }, [showSummaryOnly, onUpdateSettings]);
+
+  const toggleChordNames = useCallback(() => {
+    setShowChordNames((prev) => {
+      const next = !prev;
+      if (showSummaryOnly) setShowSummaryOnly(false);
+      onUpdateSettings({ showChordNames: next, showSummaryOnly: false });
+      return next;
+    });
+  }, [showSummaryOnly, onUpdateSettings]);
+
+  const toggleSummaryOnly = useCallback(() => {
+    setShowSummaryOnly((prev) => {
+      const next = !prev;
+      onUpdateSettings({ showSummaryOnly: next });
+      return next;
+    });
+  }, [onUpdateSettings]);
 
   // Custom Chords state & Raw ChordPro state
   const [currentRawChordPro, setCurrentRawChordPro] = useState<string>(song.rawChordPro);
@@ -188,18 +227,24 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const isScrollingRef = useRef<boolean>(isScrolling);
   isScrollingRef.current = isScrolling;
 
-  // Proportional Auto-Adjustment of Scroll Speed in Detailed Mode:
-  // In Detailed mode, inline mini chord diagrams expand vertical line height (~1.8x).
+  // Proportional Auto-Adjustment of Scroll Speed when Chord Diagrams are ON:
+  // Mini chord diagrams expand vertical line height (~1.8x).
   // The effective speed scales automatically to maintain singing/playing sync.
   const effectiveScrollSpeed = useMemo(() => {
-    if (displayMode === 'detailed') {
+    if (showChordDiagrams && !showSummaryOnly) {
       return Math.round(scrollSpeed * 1.8);
     }
     return scrollSpeed;
-  }, [scrollSpeed, displayMode]);
+  }, [scrollSpeed, showChordDiagrams, showSummaryOnly]);
 
   const effectiveScrollSpeedRef = useRef<number>(effectiveScrollSpeed);
   effectiveScrollSpeedRef.current = effectiveScrollSpeed;
+
+  // LRC Timestamps audio synchronization refs
+  const currentAudioTimeRef = useRef<number>(0);
+  const isAudioPlayingRef = useRef<boolean>(false);
+  const lrcStartTimeRef = useRef<number | null>(null);
+  const lrcStartOffsetSecRef = useRef<number>(0);
 
   // Re-parse dynamically if user edits chords or directives
   const parsed: ParsedChordPro = useMemo(() => {
@@ -209,13 +254,17 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     return p;
   }, [currentRawChordPro, songCustomChords]);
 
-  // Compute displayed lines based on 3 Display Modes
+  const hasLrcTimestamps = useMemo(() => {
+    return parsed.lines.some((l) => l.timeSeconds !== undefined && l.timeSeconds >= 0);
+  }, [parsed.lines]);
+
+  // Compute displayed lines based on Summary Mode toggle
   const displayLines = useMemo(() => {
-    if (displayMode === 'summary') {
+    if (showSummaryOnly) {
       return generateSummaryLines(parsed.lines);
     }
     return parsed.lines;
-  }, [parsed.lines, displayMode]);
+  }, [parsed.lines, showSummaryOnly]);
 
   // Unique chords present in song
   const songChords = useMemo(() => {
@@ -324,7 +373,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     };
   }, []);
 
-  // Auto-scroll loop using high-precision requestAnimationFrame with sub-pixel accumulator
+  // Auto-scroll loop using high-precision requestAnimationFrame with sub-pixel accumulator & LRC sync
   useEffect(() => {
     if (!isScrolling) {
       if (animationFrameRef.current) {
@@ -332,12 +381,18 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         animationFrameRef.current = null;
       }
       lastTimestampRef.current = null;
+      lrcStartTimeRef.current = null;
       return;
     }
 
     // Initialize exact scroll top reference when starting scroll
     if (containerRef.current) {
       exactScrollTopRef.current = containerRef.current.scrollTop;
+    }
+
+    if (lrcStartTimeRef.current === null) {
+      lrcStartTimeRef.current = performance.now();
+      lrcStartOffsetSecRef.current = currentAudioTimeRef.current || 0;
     }
 
     const scrollStep = (timestamp: number) => {
@@ -350,9 +405,83 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       if (containerRef.current && isScrollingRef.current) {
         // If currently paused by ScrollPause directive, wait without moving scrollTop
         if (!isScrollPausedRef.current) {
-          const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
-          exactScrollTopRef.current += scrollAmount;
-          containerRef.current.scrollTop = exactScrollTopRef.current;
+          if (hasLrcTimestamps) {
+            // LRC Timestamp Synchronized Auto-Scroll Mode
+            let currentSeconds = 0;
+            if (isAudioPlayingRef.current) {
+              currentSeconds = currentAudioTimeRef.current;
+            } else {
+              if (lrcStartTimeRef.current === null) {
+                lrcStartTimeRef.current = timestamp;
+              }
+              currentSeconds = lrcStartOffsetSecRef.current + (timestamp - lrcStartTimeRef.current) / 1000;
+            }
+
+            const timestampNodes = containerRef.current.querySelectorAll<HTMLElement>(
+              '[data-time-seconds]:not([data-time-seconds=""])'
+            );
+
+            if (timestampNodes.length > 0) {
+              const items: { time: number; top: number }[] = [];
+              const containerRect = containerRef.current.getBoundingClientRect();
+              const cScrollTop = containerRef.current.scrollTop;
+
+              timestampNodes.forEach((node) => {
+                const sec = parseFloat(node.getAttribute('data-time-seconds') || '0');
+                const nodeRect = node.getBoundingClientRect();
+                const nodeTop = nodeRect.top - containerRect.top + cScrollTop;
+                items.push({ time: sec, top: nodeTop });
+              });
+
+              items.sort((a, b) => a.time - b.time);
+
+              const containerHeight = containerRef.current.clientHeight;
+              const focalOffset = containerHeight * 0.35;
+              const maxScroll = containerRef.current.scrollHeight - containerHeight;
+
+              let targetTop = 0;
+              if (currentSeconds <= items[0].time) {
+                const ratio = Math.max(0, currentSeconds / Math.max(items[0].time, 0.1));
+                const firstTarget = Math.max(0, items[0].top - focalOffset);
+                targetTop = ratio * firstTarget;
+              } else if (currentSeconds >= items[items.length - 1].time) {
+                const lastItem = items[items.length - 1];
+                const lastTarget = Math.max(0, lastItem.top - focalOffset);
+                const overTime = currentSeconds - lastItem.time;
+                targetTop = Math.min(maxScroll, lastTarget + overTime * (effectiveScrollSpeedRef.current || 20));
+              } else {
+                let k = 0;
+                for (let i = 0; i < items.length - 1; i++) {
+                  if (currentSeconds >= items[i].time && currentSeconds < items[i + 1].time) {
+                    k = i;
+                    break;
+                  }
+                }
+                const itemA = items[k];
+                const itemB = items[k + 1];
+                const dt = Math.max(0.01, itemB.time - itemA.time);
+                const ratio = Math.max(0, Math.min(1, (currentSeconds - itemA.time) / dt));
+                const topA = Math.max(0, itemA.top - focalOffset);
+                const topB = Math.max(0, itemB.top - focalOffset);
+                targetTop = topA + ratio * (topB - topA);
+              }
+
+              targetTop = Math.max(0, Math.min(maxScroll, targetTop));
+              const lerpFactor = Math.min(1, deltaSeconds * 8);
+              exactScrollTopRef.current += (targetTop - exactScrollTopRef.current) * lerpFactor;
+              containerRef.current.scrollTop = exactScrollTopRef.current;
+            } else {
+              // Fallback to speed
+              const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
+              exactScrollTopRef.current += scrollAmount;
+              containerRef.current.scrollTop = exactScrollTopRef.current;
+            }
+          } else {
+            // Standard fixed speed auto-scroll
+            const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
+            exactScrollTopRef.current += scrollAmount;
+            containerRef.current.scrollTop = exactScrollTopRef.current;
+          }
 
           const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
           const maxScroll = scrollHeight - clientHeight;
@@ -400,7 +529,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isScrolling, triggerScrollPause]);
+  }, [isScrolling, triggerScrollPause, hasLrcTimestamps]);
 
   // Restart scroll from top
   const handleRestart = () => {
@@ -409,6 +538,9 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       exactScrollTopRef.current = 0;
       setScrollProgress(0);
       triggeredPausesRef.current.clear();
+      lrcStartTimeRef.current = null;
+      lrcStartOffsetSecRef.current = 0;
+      currentAudioTimeRef.current = 0;
       handleSkipPause();
     }
   };
@@ -498,20 +630,25 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       } else if (e.key === 'Home') {
         e.preventDefault();
         handleRestart();
-      } else if (e.key === 's' || e.key === 'S') {
-        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-          e.preventDefault();
-          setDisplayMode('summary');
-        }
-      } else if (e.key === 'n' || e.key === 'N') {
-        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-          e.preventDefault();
-          setDisplayMode('normal');
-        }
       } else if (e.key === 'd' || e.key === 'D') {
         if (!e.ctrlKey && !e.metaKey && !e.altKey) {
           e.preventDefault();
-          setDisplayMode('detailed');
+          toggleChordDiagrams();
+        }
+      } else if (e.key === 't' || e.key === 'T') {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          toggleTabDiagrams();
+        }
+      } else if (e.key === 'c' || e.key === 'C') {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          toggleChordNames();
+        }
+      } else if (e.key === 's' || e.key === 'S') {
+        if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          toggleSummaryOnly();
         }
       } else if (e.key === '+' || e.key === '=') {
         setTransposeOffset((prev) => (prev + 1) % 12);
@@ -524,7 +661,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [scrollSpeed, hasManuallyChangedSpeed, hasCustomChordChanges]);
+  }, [scrollSpeed, hasManuallyChangedSpeed, hasCustomChordChanges, toggleChordDiagrams, toggleTabDiagrams, toggleChordNames, toggleSummaryOnly]);
 
   // Handle chord diagram "Keep Change" from editor
   const handleKeepChordChange = (
@@ -1236,47 +1373,66 @@ export const SongViewer: React.FC<SongViewerProps> = ({
 
         {/* Center/Right: 3 Display Mode Buttons [D] [N] [S], Add Chord, BackTrack & Transpose */}
         <div className="flex items-center flex-wrap gap-1.5 sm:gap-2.5 shrink-0">
-          {/* 3 Display Mode Buttons: [D] Detailed, [N] Normal, [S] Summary */}
+          {/* Feature-by-Feature Display Toggles: [D] Chord Diagram, [T] TAB Diagram, [C] Chord Name, [S] Summary Only */}
           <div 
             id="viewer-display-mode-selector"
             className="flex items-center bg-slate-900/90 border border-slate-700/80 rounded-xl p-0.5 shadow-sm"
           >
             <button
-              id="mode-detailed-btn"
+              id="mode-chord-diagram-btn"
               type="button"
-              onClick={() => setDisplayMode('detailed')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                displayMode === 'detailed'
-                  ? 'bg-amber-400 text-slate-950 font-black shadow-sm ring-1 ring-amber-400/50'
-                  : 'text-slate-300 hover:text-amber-300 hover:bg-slate-800'
+              onClick={toggleChordDiagrams}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                showChordDiagrams && !showSummaryOnly
+                  ? 'bg-amber-400 text-slate-950 font-black shadow-xs ring-1 ring-amber-400/50'
+                  : showSummaryOnly
+                  ? 'opacity-35 text-slate-500 hover:opacity-70'
+                  : 'text-slate-400 hover:text-amber-300 hover:bg-slate-800'
               }`}
-              title="Detailed Mode [D] - Shows compact guitar chord grid diagram above every chord"
+              title="Chord Diagram [D] - When ON, displays guitar chord grid diagram above chords"
             >
               D
             </button>
             <button
-              id="mode-normal-btn"
+              id="mode-tab-diagram-btn"
               type="button"
-              onClick={() => setDisplayMode('normal')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                displayMode === 'normal'
-                  ? 'bg-amber-400 text-slate-950 font-black shadow-sm ring-1 ring-amber-400/50'
-                  : 'text-slate-300 hover:text-amber-300 hover:bg-slate-800'
+              onClick={toggleTabDiagrams}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                showTabDiagrams && !showSummaryOnly
+                  ? 'bg-amber-400 text-slate-950 font-black shadow-xs ring-1 ring-amber-400/50'
+                  : showSummaryOnly
+                  ? 'opacity-35 text-slate-500 hover:opacity-70'
+                  : 'text-slate-400 hover:text-amber-300 hover:bg-slate-800'
               }`}
-              title="Normal Mode [N] - Standard lyrics & chords scrolling view"
+              title="TAB Diagram [T] - When ON, displays instrument tablature diagrams"
             >
-              N
+              T
+            </button>
+            <button
+              id="mode-chord-name-btn"
+              type="button"
+              onClick={toggleChordNames}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                showChordNames && !showSummaryOnly
+                  ? 'bg-amber-400 text-slate-950 font-black shadow-xs ring-1 ring-amber-400/50'
+                  : showSummaryOnly
+                  ? 'opacity-35 text-slate-500 hover:opacity-70'
+                  : 'text-slate-400 hover:text-amber-300 hover:bg-slate-800'
+              }`}
+              title="Chord Name [C] - When ON, displays chord names on top of lyrics"
+            >
+              C
             </button>
             <button
               id="mode-summary-btn"
               type="button"
-              onClick={() => setDisplayMode('summary')}
-              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all ${
-                displayMode === 'summary'
-                  ? 'bg-amber-400 text-slate-950 font-black shadow-sm ring-1 ring-amber-400/50'
-                  : 'text-slate-300 hover:text-amber-300 hover:bg-slate-800'
+              onClick={toggleSummaryOnly}
+              className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                showSummaryOnly
+                  ? 'bg-purple-400 text-slate-950 font-black shadow-xs ring-1 ring-purple-400/50'
+                  : 'text-slate-400 hover:text-purple-300 hover:bg-slate-800'
               }`}
-              title="Summary Mode [S] - Song structural outline, intro/outro chords & first 3 words reminder"
+              title="Summary 'Hint' Lyrics Only [S] - When ON, only shows Hint lyrics and overrides Diagrams, TABs, and Chord Names"
             >
               S
             </button>
@@ -1469,38 +1625,38 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           )}
 
           {/* Mode Notification Banners */}
-          {displayMode === 'summary' && (
-            <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2.5 text-xs text-amber-300 animate-in fade-in">
+          {showSummaryOnly && (
+            <div className="flex items-center justify-between bg-purple-500/15 border border-purple-500/35 rounded-xl px-4 py-2.5 text-xs text-purple-200 animate-in fade-in">
               <div className="flex items-center gap-2">
-                <FileText className="w-4 h-4 text-amber-400 shrink-0" />
+                <FileText className="w-4 h-4 text-purple-400 shrink-0" />
                 <span>
-                  <strong>Summary Mode [S]:</strong> Section headers, intro/outro chords, and first 3 words reminder.
+                  <strong>Summary 'Hint' Mode [S]:</strong> Section headers, intro/outro chords, and first 3 words reminder. (Overrides diagrams, TABs & chord names).
                 </span>
               </div>
               <button
                 type="button"
-                onClick={() => setDisplayMode('normal')}
-                className="text-[11px] underline text-amber-400 hover:text-amber-200 shrink-0 font-semibold ml-2"
+                onClick={toggleSummaryOnly}
+                className="text-[11px] underline text-purple-300 hover:text-white shrink-0 font-semibold ml-2 cursor-pointer"
               >
-                Switch to Normal Mode [N]
+                Turn Off Summary [S]
               </button>
             </div>
           )}
 
-          {displayMode === 'detailed' && (
+          {showChordDiagrams && !showSummaryOnly && (
             <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/30 rounded-xl px-4 py-2 text-xs text-amber-300 animate-in fade-in">
               <div className="flex items-center gap-2">
                 <Guitar className="w-4 h-4 text-amber-400 shrink-0" />
                 <span>
-                  <strong>Detailed Mode [D]:</strong> Guitar chord diagrams displayed above every chord. Scroll speed auto-adjusted ({effectiveScrollSpeed}px/s).
+                  <strong>Chord Diagrams [D]:</strong> Guitar chord diagrams displayed above chords. Scroll speed auto-adjusted ({effectiveScrollSpeed}px/s).
                 </span>
               </div>
               <button
                 type="button"
-                onClick={() => setDisplayMode('normal')}
-                className="text-[11px] underline text-amber-400 hover:text-amber-200 shrink-0 font-semibold ml-2"
+                onClick={toggleChordDiagrams}
+                className="text-[11px] underline text-amber-400 hover:text-amber-200 shrink-0 font-semibold ml-2 cursor-pointer"
               >
-                Switch to Normal Mode [N]
+                Hide Diagrams [D]
               </button>
             </div>
           )}
@@ -1521,7 +1677,10 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 transposeOffset={transposeOffset}
                 preferSharps={preferSharps}
                 themeStyles={themeStyles}
-                displayMode={displayMode}
+                showChordDiagrams={showChordDiagrams}
+                showTabDiagrams={showTabDiagrams}
+                showChordNames={showChordNames}
+                showSummaryOnly={showSummaryOnly}
                 customChords={songCustomChords}
                 isAddChordMode={isAddChordMode}
                 tabWrapMode={settings.tabWrapMode || 'fit'}
@@ -1832,60 +1991,108 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           <div className="flex items-center justify-between border-b border-slate-800 pb-2">
             <span className="font-bold text-slate-100 flex items-center gap-1.5">
               <Sliders className="w-4 h-4 text-amber-400" />
-              Stage & Display Settings
+              Song Session & Display Settings
             </span>
             <button
               onClick={() => setShowSettingsDrawer(false)}
-              className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-xs"
+              className="p-1 rounded-md text-slate-400 hover:text-slate-200 hover:bg-slate-800 text-xs cursor-pointer"
             >
               ✕
             </button>
           </div>
 
-          {/* 3 Display Modes Card */}
+          {/* Feature Display Toggles Card for this Song */}
           <div className="p-3 rounded-xl border bg-slate-950/70 border-slate-800 space-y-2">
-            <div className="text-slate-100 font-bold flex items-center gap-1.5 text-xs">
-              <FileText className="w-4 h-4 text-amber-400" />
-              <span>Display Mode</span>
+            <div className="text-slate-100 font-bold flex items-center justify-between text-xs">
+              <span className="flex items-center gap-1.5">
+                <FileText className="w-4 h-4 text-amber-400" />
+                <span>Display Elements</span>
+              </span>
+              <span className="text-[10px] text-slate-400 font-mono">Toggles</span>
             </div>
-            <div className="grid grid-cols-3 gap-1.5 pt-1">
+
+            <div className="grid grid-cols-2 gap-1.5 pt-1">
+              {/* [D] Chord Diagrams */}
               <button
                 type="button"
-                onClick={() => setDisplayMode('detailed')}
-                className={`py-1.5 px-2 rounded-lg text-center font-bold text-xs border transition-colors ${
-                  displayMode === 'detailed'
-                    ? 'bg-amber-400 text-slate-950 border-amber-300'
-                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
+                onClick={toggleChordDiagrams}
+                className={`py-1.5 px-2 rounded-lg text-left text-xs border transition-colors cursor-pointer flex items-center justify-between ${
+                  showChordDiagrams && !showSummaryOnly
+                    ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
                 }`}
-                title="Detailed Mode"
               >
-                [D] Detailed
+                <span>[D] Diagrams</span>
+                <span className="font-mono text-[10px]">{showChordDiagrams && !showSummaryOnly ? 'ON' : 'OFF'}</span>
               </button>
+
+              {/* [T] TAB Diagrams */}
               <button
                 type="button"
-                onClick={() => setDisplayMode('normal')}
-                className={`py-1.5 px-2 rounded-lg text-center font-bold text-xs border transition-colors ${
-                  displayMode === 'normal'
-                    ? 'bg-amber-400 text-slate-950 border-amber-300'
-                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
+                onClick={toggleTabDiagrams}
+                className={`py-1.5 px-2 rounded-lg text-left text-xs border transition-colors cursor-pointer flex items-center justify-between ${
+                  showTabDiagrams && !showSummaryOnly
+                    ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
                 }`}
-                title="Normal Mode"
               >
-                [N] Normal
+                <span>[T] TABs</span>
+                <span className="font-mono text-[10px]">{showTabDiagrams && !showSummaryOnly ? 'ON' : 'OFF'}</span>
               </button>
+
+              {/* [C] Chord Names */}
               <button
                 type="button"
-                onClick={() => setDisplayMode('summary')}
-                className={`py-1.5 px-2 rounded-lg text-center font-bold text-xs border transition-colors ${
-                  displayMode === 'summary'
-                    ? 'bg-amber-400 text-slate-950 border-amber-300'
-                    : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
+                onClick={toggleChordNames}
+                className={`py-1.5 px-2 rounded-lg text-left text-xs border transition-colors cursor-pointer flex items-center justify-between ${
+                  showChordNames && !showSummaryOnly
+                    ? 'bg-amber-400 text-slate-950 font-bold border-amber-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200'
                 }`}
-                title="Summary Mode"
               >
-                [S] Summary
+                <span>[C] Chords</span>
+                <span className="font-mono text-[10px]">{showChordNames && !showSummaryOnly ? 'ON' : 'OFF'}</span>
+              </button>
+
+              {/* [S] Summary Only */}
+              <button
+                type="button"
+                onClick={toggleSummaryOnly}
+                className={`py-1.5 px-2 rounded-lg text-left text-xs border transition-colors cursor-pointer flex items-center justify-between ${
+                  showSummaryOnly
+                    ? 'bg-purple-400 text-slate-950 font-bold border-purple-300'
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-purple-300'
+                }`}
+              >
+                <span>[S] Summary</span>
+                <span className="font-mono text-[10px]">{showSummaryOnly ? 'ON' : 'OFF'}</span>
               </button>
             </div>
+          </div>
+
+          {/* Song Auto-Scroll Speed Setting */}
+          <div className="p-3 rounded-xl border bg-slate-950/70 border-slate-800 space-y-2">
+            <div className="flex items-center justify-between text-slate-300">
+              <span className="font-bold text-white flex items-center gap-1.5 text-xs">
+                <Play className="w-3.5 h-3.5 text-amber-400" />
+                <span>Song Auto-Scroll Speed:</span>
+              </span>
+              <span className="font-mono text-amber-400 font-bold">{scrollSpeed} px/s</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min="1"
+                max="120"
+                step="1"
+                value={scrollSpeed}
+                onChange={(e) => handleSpeedChange(parseInt(e.target.value, 10) || 1)}
+                className="flex-1 accent-amber-400"
+              />
+            </div>
+            <p className="text-[10px] text-slate-400">
+              Saved into this song&#39;s ChordPro file as default speed.
+            </p>
           </div>
 
           {/* Font Size Adjuster */}
@@ -1898,7 +2105,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
               <button
                 type="button"
                 onClick={() => setFontSize((s) => Math.max(13, s - 1))}
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg"
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg cursor-pointer"
               >
                 <Minus className="w-3.5 h-3.5" />
               </button>
@@ -1913,7 +2120,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
               <button
                 type="button"
                 onClick={() => setFontSize((s) => Math.min(32, s + 1))}
-                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg"
+                className="p-1.5 bg-slate-800 hover:bg-slate-700 rounded-lg cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -1934,7 +2141,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                   key={t.id}
                   type="button"
                   onClick={() => setTheme(t.id as any)}
-                  className={`py-1.5 px-2 rounded-lg text-center font-medium border transition-colors ${
+                  className={`py-1.5 px-2 rounded-lg text-center font-medium border transition-colors cursor-pointer ${
                     theme === t.id
                       ? 'bg-amber-500/20 border-amber-400 text-amber-300'
                       : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
@@ -1943,87 +2150,6 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                   {t.label}
                 </button>
               ))}
-            </div>
-          </div>
-
-          {/* TAB & Instrument Settings */}
-          <div className="p-3 rounded-xl border bg-slate-950/70 border-slate-800 space-y-2.5">
-            <div className="text-slate-100 font-bold flex items-center justify-between text-xs">
-              <span className="flex items-center gap-1.5">
-                <Guitar className="w-3.5 h-3.5 text-amber-400" />
-                <span>TAB & Instrument Preset</span>
-              </span>
-            </div>
-
-            {/* Instrument Tuning Selection */}
-            <div className="space-y-1">
-              <span className="text-[11px] text-slate-400">Instrument Strings:</span>
-              <div className="grid grid-cols-3 gap-1">
-                {(['guitar', 'ukulele', 'bass'] as const).map((inst) => (
-                  <button
-                    key={inst}
-                    type="button"
-                    onClick={() => onUpdateSettings({ instrument: inst })}
-                    className={`py-1 px-1.5 rounded-lg text-center font-bold text-[11px] border capitalize transition-colors ${
-                      (settings.instrument || 'guitar') === inst
-                        ? 'bg-amber-400 text-slate-950 border-amber-300'
-                        : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
-                    }`}
-                  >
-                    {inst}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Measure Insert Width */}
-            <div className="space-y-1 pt-1.5 border-t border-slate-800/80">
-              <div className="flex justify-between text-slate-300 text-[11px]">
-                <span>Measure Insert Width:</span>
-                <span className="font-mono text-amber-400 font-bold">{settings.measureInsertWidth || 20} cols</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="8"
-                  max="40"
-                  step="1"
-                  value={settings.measureInsertWidth || 20}
-                  onChange={(e) => onUpdateSettings({ measureInsertWidth: parseInt(e.target.value, 10) })}
-                  className="flex-1 accent-amber-400"
-                />
-              </div>
-            </div>
-
-            {/* TAB Wrap-Around vs. Resizing Mode Toggle */}
-            <div className="space-y-1 pt-1.5 border-t border-slate-800/80">
-              <span className="text-[11px] text-slate-400 block">TAB Layout Mode:</span>
-              <div className="grid grid-cols-2 gap-1">
-                <button
-                  type="button"
-                  onClick={() => onUpdateSettings({ tabWrapMode: 'fit' })}
-                  className={`py-1 px-1.5 rounded-lg text-center font-bold text-[11px] border transition-colors cursor-pointer ${
-                    (settings.tabWrapMode || 'fit') === 'fit'
-                      ? 'bg-amber-400 text-slate-950 border-amber-300'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
-                  }`}
-                  title="Auto-scales the TAB diagram to fit container width without breaking lines"
-                >
-                  Resize to Fit
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onUpdateSettings({ tabWrapMode: 'wrap' })}
-                  className={`py-1 px-1.5 rounded-lg text-center font-bold text-[11px] border transition-colors cursor-pointer ${
-                    settings.tabWrapMode === 'wrap'
-                      ? 'bg-amber-400 text-slate-950 border-amber-300'
-                      : 'bg-slate-800 border-slate-700 text-slate-300 hover:text-amber-300'
-                  }`}
-                  title="Wraps measures across multiple lines when exceeding container width"
-                >
-                  Wrap Measures
-                </button>
-              </div>
             </div>
           </div>
 
@@ -2099,41 +2225,59 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3">
           {/* Reposition, 3-Mode Toggle & Restart Buttons */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            {/* Quick 3 Display Mode Toggle in Bottom Bar */}
+            {/* Quick Feature-by-Feature Display Toggles in Bottom Bar */}
             <div className="flex items-center bg-slate-950/80 border border-slate-800 rounded-xl p-0.5 text-xs">
               <button
                 type="button"
-                onClick={() => setDisplayMode('detailed')}
-                className={`px-2 py-1 rounded-lg font-bold transition-all ${
-                  displayMode === 'detailed'
+                onClick={toggleChordDiagrams}
+                className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  showChordDiagrams && !showSummaryOnly
                     ? 'bg-amber-400 text-slate-950 font-black'
+                    : showSummaryOnly
+                    ? 'opacity-35 text-slate-500 hover:opacity-70'
                     : 'text-slate-400 hover:text-slate-100'
                 }`}
-                title="Detailed Mode [D] with inline guitar chord diagrams"
+                title="Chord Diagram [D] - Toggle inline guitar chord diagrams"
               >
                 D
               </button>
               <button
                 type="button"
-                onClick={() => setDisplayMode('normal')}
-                className={`px-2 py-1 rounded-lg font-bold transition-all ${
-                  displayMode === 'normal'
+                onClick={toggleTabDiagrams}
+                className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  showTabDiagrams && !showSummaryOnly
                     ? 'bg-amber-400 text-slate-950 font-black'
+                    : showSummaryOnly
+                    ? 'opacity-35 text-slate-500 hover:opacity-70'
                     : 'text-slate-400 hover:text-slate-100'
                 }`}
-                title="Normal Mode [N]"
+                title="TAB Diagram [T] - Toggle instrument tablature diagrams"
               >
-                N
+                T
               </button>
               <button
                 type="button"
-                onClick={() => setDisplayMode('summary')}
-                className={`px-2 py-1 rounded-lg font-bold transition-all ${
-                  displayMode === 'summary'
+                onClick={toggleChordNames}
+                className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  showChordNames && !showSummaryOnly
                     ? 'bg-amber-400 text-slate-950 font-black'
+                    : showSummaryOnly
+                    ? 'opacity-35 text-slate-500 hover:opacity-70'
                     : 'text-slate-400 hover:text-slate-100'
                 }`}
-                title="Summary Mode [S]"
+                title="Chord Name [C] - Toggle chord names on lyrics"
+              >
+                C
+              </button>
+              <button
+                type="button"
+                onClick={toggleSummaryOnly}
+                className={`px-2 py-1 rounded-lg font-bold transition-all cursor-pointer ${
+                  showSummaryOnly
+                    ? 'bg-purple-400 text-slate-950 font-black'
+                    : 'text-slate-400 hover:text-slate-100'
+                }`}
+                title="Summary 'Hint' Lyrics Only [S] - Toggle outline summary mode"
               >
                 S
               </button>
@@ -2176,8 +2320,17 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             </button>
           </div>
 
-          {/* Primary Play / Pause Action Button */}
-          <div className="flex items-center">
+          {/* Primary Play / Pause Action Button & LRC Sync indicator */}
+          <div className="flex items-center gap-2">
+            {hasLrcTimestamps && (
+              <div 
+                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[11px] font-bold shadow-sm"
+                title="Song contains LRC timestamps for synchronized lyric scrolling"
+              >
+                <span className={`w-2 h-2 rounded-full ${isScrolling ? 'bg-emerald-400 animate-pulse' : 'bg-purple-400'}`} />
+                <span>LRC Sync</span>
+              </div>
+            )}
             <button
               id="scroll-play-pause-btn"
               type="button"
@@ -2241,7 +2394,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             </button>
 
             <span className="font-mono text-xs font-bold text-amber-300 min-w-[42px] text-right">
-              {displayMode === 'detailed' ? `${effectiveScrollSpeed}px/s*` : `${scrollSpeed}px/s`}
+              {showChordDiagrams && !showSummaryOnly ? `${effectiveScrollSpeed}px/s*` : `${scrollSpeed}px/s`}
             </span>
           </div>
         </div>
@@ -2400,8 +2553,18 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       {/* BackTrack Floating Player (YouTube PiP & Background Audio) */}
       <BackTrackFloatingPlayer
         track={activeFloatingTrack}
-        onClose={() => setActiveFloatingTrack(null)}
+        onClose={() => {
+          setActiveFloatingTrack(null);
+          isAudioPlayingRef.current = false;
+        }}
         onOpenInBrowser={handleOpenBackTrackInBrowser}
+        onTimeUpdate={(t, playing) => {
+          currentAudioTimeRef.current = t;
+          isAudioPlayingRef.current = playing;
+          if (playing && !isScrollingRef.current) {
+            setIsScrolling(true);
+          }
+        }}
       />
 
       {/* Interactive TAB Diagram Grid Editor Modal */}
@@ -2521,7 +2684,10 @@ interface RenderLineProps {
   transposeOffset: number;
   preferSharps: boolean;
   themeStyles: any;
-  displayMode: DisplayMode;
+  showChordDiagrams: boolean;
+  showTabDiagrams: boolean;
+  showChordNames: boolean;
+  showSummaryOnly: boolean;
   customChords?: Record<string, ChordVoicing>;
   isAddChordMode?: boolean;
   tabWrapMode?: 'fit' | 'wrap';
@@ -2547,7 +2713,10 @@ const RenderLine: React.FC<RenderLineProps> = ({
   transposeOffset,
   preferSharps,
   themeStyles,
-  displayMode,
+  showChordDiagrams,
+  showTabDiagrams,
+  showChordNames,
+  showSummaryOnly,
   customChords,
   isAddChordMode,
   tabWrapMode,
@@ -2602,8 +2771,9 @@ const RenderLine: React.FC<RenderLineProps> = ({
     );
   }
 
+  // TAB Diagram Line: Controlled by [T] toggle and overridden by [S]
   if (line.type === 'tab' || line.type === 'tab_start') {
-    if (displayMode === 'summary') return null;
+    if (showSummaryOnly || !showTabDiagrams) return null;
 
     const tabTitle = line.text || '';
     const tabLines = line.tabLines && line.tabLines.length > 0 
@@ -2661,10 +2831,38 @@ const RenderLine: React.FC<RenderLineProps> = ({
 
   if (line.type === 'lyrics' && line.segments) {
     const rawLineText = line.segments.map(s => (s.chord ? `[${s.chord}]` : '') + (s.lyrics || '')).join('');
+
+    // If both Chord Diagrams and Chord Names are turned OFF: clean lyrics only!
+    if (!showChordNames && !showChordDiagrams) {
+      const fullLineLyrics = line.segments.map(s => s.lyrics || '').join('');
+      return (
+        <div 
+          data-line-index={lineIndex}
+          data-time-seconds={line.timeSeconds !== undefined ? line.timeSeconds : ''}
+          className={`my-1.5 leading-relaxed rounded-lg transition-colors ${
+            isAddChordMode 
+              ? 'cursor-pointer p-1 bg-amber-500/10 hover:bg-amber-500/20 ring-1 ring-amber-400/50' 
+              : ''
+          }`}
+          onClick={() => {
+            if (isAddChordMode && onLineClick) {
+              onLineClick(line.sourceLineIndex, rawLineText);
+            }
+          }}
+        >
+          <span className="select-text whitespace-pre">
+            {fullLineLyrics || '\u00A0'}
+          </span>
+        </div>
+      );
+    }
+
     let chordOccurrenceInLine = 0;
 
     return (
       <div 
+        data-line-index={lineIndex}
+        data-time-seconds={line.timeSeconds !== undefined ? line.timeSeconds : ''}
         className={`flex flex-wrap items-end my-1.5 leading-snug rounded-lg transition-colors ${
           isAddChordMode 
             ? 'cursor-pointer p-1 bg-amber-500/10 hover:bg-amber-500/20 ring-1 ring-amber-400/50' 
@@ -2688,12 +2886,12 @@ const RenderLine: React.FC<RenderLineProps> = ({
             <div
               key={segIdx}
               className={`inline-flex flex-col mr-1 group/seg align-bottom items-start ${
-                displayMode === 'detailed' && transposedChord ? 'min-w-[42px]' : ''
+                showChordDiagrams && !showSummaryOnly && transposedChord ? 'min-w-[42px]' : ''
               }`}
             >
-              {/* Detailed Mode: Compact Chord Diagram centered directly above the chord name */}
+              {/* Detailed Mode: Compact Chord Diagram centered directly above chord name */}
               <div className="flex flex-col items-center justify-end w-fit">
-                {displayMode === 'detailed' && transposedChord && (
+                {showChordDiagrams && !showSummaryOnly && transposedChord && (
                   <div 
                     className="flex justify-center pb-0.5 cursor-pointer hover:opacity-80 transition-opacity"
                     onClick={(e) => {
@@ -2719,23 +2917,27 @@ const RenderLine: React.FC<RenderLineProps> = ({
                   </div>
                 )}
 
-                {/* Chord Row */}
-                <ChordSegmentItem
-                  chord={transposedChord}
-                  rawChord={rawChord}
-                  customVoicing={customChords?.[transposedChord] || (rawChord ? customChords?.[rawChord] : undefined)}
-                  customChords={customChords}
-                  themeChordStyle={themeStyles.chord}
-                  onChordClick={() => onChordClick(transposedChord, { 
-                    chord: transposedChord, 
-                    rawChord,
-                    lineIndex, 
-                    segIdx, 
-                    chordIndexInLine: currentChordIdx, 
-                    sourceLineIndex: line.sourceLineIndex,
-                    rawLine: line.raw || rawLineText,
-                  })}
-                />
+                {/* Chord Name Row (shown if showChordNames is ON) */}
+                {showChordNames ? (
+                  <ChordSegmentItem
+                    chord={transposedChord}
+                    rawChord={rawChord}
+                    customVoicing={customChords?.[transposedChord] || (rawChord ? customChords?.[rawChord] : undefined)}
+                    customChords={customChords}
+                    themeChordStyle={themeStyles.chord}
+                    onChordClick={() => onChordClick(transposedChord, { 
+                      chord: transposedChord, 
+                      rawChord,
+                      lineIndex, 
+                      segIdx, 
+                      chordIndexInLine: currentChordIdx, 
+                      sourceLineIndex: line.sourceLineIndex,
+                      rawLine: line.raw || rawLineText,
+                    })}
+                  />
+                ) : (
+                  <span className="h-0 min-h-0" />
+                )}
               </div>
 
               {/* Lyrics Row */}

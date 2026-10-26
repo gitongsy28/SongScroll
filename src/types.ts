@@ -31,13 +31,15 @@ export interface ChordProLine {
   pauseSeconds?: number;
   sourceLineIndex?: number;
   tabLines?: string[];
+  timestamp?: string; // LRC timestamp e.g. "[00:12.34]"
+  timeSeconds?: number; // timestamp converted to seconds (e.g. 12.34)
 }
 
 export type BackTrackType = 'youtube' | 'audio-url' | 'github' | 'local' | 'web';
 
 export interface BackTrackItem {
-  id: string; // e.g. "BackTrack1"
-  index: number; // 1 to 5
+  id: string; // e.g. "BackTrack1" ... "BackTrack10"
+  index: number; // 1 to 10
   description: string;
   url: string;
   type: BackTrackType;
@@ -107,6 +109,11 @@ export interface ViewerSettings {
   instrument?: 'guitar' | 'ukulele' | 'bass';
   measureInsertWidth?: number; // columns per newly added measure (default 20)
   tabWrapMode?: 'fit' | 'wrap'; // Scale to fit width vs Wrap measures onto next row
+  // Feature-by-feature Display Mode Toggles
+  showChordDiagrams?: boolean; // [D] Chord diagrams above chords (default: true)
+  showTabDiagrams?: boolean;   // [T] TAB diagrams (default: true)
+  showChordNames?: boolean;    // [C] Chord names on top of lyrics (default: true)
+  showSummaryOnly?: boolean;   // [S] Summary 'Hint' lyrics only (default: false)
 }
 
 export interface MetronomeState {

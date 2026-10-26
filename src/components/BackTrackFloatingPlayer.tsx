@@ -20,12 +20,14 @@ interface BackTrackFloatingPlayerProps {
   track: BackTrackItem | null;
   onClose: () => void;
   onOpenInBrowser: (track: BackTrackItem) => void;
+  onTimeUpdate?: (currentTime: number, isPlaying: boolean) => void;
 }
 
 export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = ({
   track,
   onClose,
   onOpenInBrowser,
+  onTimeUpdate,
 }) => {
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -39,14 +41,34 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
     setIsPlaying(true);
     setCurrentTime(0);
     setDuration(0);
+    onTimeUpdate?.(0, true);
   }, [track?.id, track?.url]);
 
-  if (!track) return null;
+  const isYouTube = track?.type === 'youtube';
+  const ytVideoId = isYouTube ? extractYouTubeId(track?.url || '') : null;
+  const isAudio = track?.type === 'github' || track?.type === 'audio-url';
+  const streamableAudioUrl = isAudio ? getStreamableAudioUrl(track?.url || '') : '';
 
-  const isYouTube = track.type === 'youtube';
-  const ytVideoId = isYouTube ? extractYouTubeId(track.url) : null;
-  const isAudio = track.type === 'github' || track.type === 'audio-url';
-  const streamableAudioUrl = isAudio ? getStreamableAudioUrl(track.url) : '';
+  // Synchronize playback time ticker for YouTube video and pass to onTimeUpdate
+  useEffect(() => {
+    if (!isPlaying) {
+      onTimeUpdate?.(currentTime, false);
+      return;
+    }
+
+    if (isYouTube) {
+      const interval = setInterval(() => {
+        setCurrentTime((prev) => {
+          const next = prev + 0.25;
+          onTimeUpdate?.(next, true);
+          return next;
+        });
+      }, 250);
+      return () => clearInterval(interval);
+    }
+  }, [isPlaying, isYouTube, onTimeUpdate]);
+
+  if (!track) return null;
 
   const formatTime = (secs: number) => {
     if (isNaN(secs) || secs < 0) return '0:00';
@@ -70,6 +92,7 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
     if (audioRef.current) {
       audioRef.current.currentTime = val;
       setCurrentTime(val);
+      onTimeUpdate?.(val, isPlaying);
     }
   };
 
@@ -200,7 +223,9 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
                 autoPlay
                 onTimeUpdate={() => {
                   if (audioRef.current) {
-                    setCurrentTime(audioRef.current.currentTime);
+                    const t = audioRef.current.currentTime;
+                    setCurrentTime(t);
+                    onTimeUpdate?.(t, isPlaying);
                   }
                 }}
                 onLoadedMetadata={() => {

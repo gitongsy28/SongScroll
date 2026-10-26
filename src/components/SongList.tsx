@@ -13,7 +13,8 @@ import {
   Filter,
   X,
   Github,
-  Globe
+  Globe,
+  Settings
 } from 'lucide-react';
 import { RepositoryConfig, Song } from '../types';
 
@@ -25,6 +26,7 @@ interface SongListProps {
   onEditSong: (song: Song) => void;
   onDeleteSong?: (songId: string) => void;
   onOpenAndroidModal: () => void;
+  onOpenGlobalSettings: () => void;
   repoConfig: RepositoryConfig;
 }
 
@@ -35,6 +37,7 @@ export const SongList: React.FC<SongListProps> = ({
   onOpenNewSongModal,
   onEditSong,
   onOpenAndroidModal,
+  onOpenGlobalSettings,
   repoConfig,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -218,7 +221,7 @@ export const SongList: React.FC<SongListProps> = ({
               id="header-repo-config-btn"
               type="button"
               onClick={onOpenDirectoryConfig}
-              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all"
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
               title="Configure local drive storage or GitHub sync"
             >
               {repoConfig.sourceType === 'github-url' || (repoConfig.directoryPath && repoConfig.directoryPath.includes('github.com')) ? (
@@ -230,10 +233,21 @@ export const SongList: React.FC<SongListProps> = ({
             </button>
 
             <button
+              id="header-global-settings-btn"
+              type="button"
+              onClick={onOpenGlobalSettings}
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Global System Settings & Defaults (Stage, Display, TAB & Instruments)"
+            >
+              <Settings className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">Settings</span>
+            </button>
+
+            <button
               id="header-add-song-btn"
               type="button"
               onClick={onOpenNewSongModal}
-              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all"
+              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 active:bg-amber-600 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Song</span>

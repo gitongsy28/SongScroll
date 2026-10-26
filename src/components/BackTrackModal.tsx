@@ -131,7 +131,7 @@ export const BackTrackModal: React.FC<BackTrackModalProps> = ({
         url: trimmedUrl,
         type,
       };
-      const updated = [...validTracks, newTrack].slice(0, 5).map((t, idx) => ({
+      const updated = [...validTracks, newTrack].slice(0, 10).map((t, idx) => ({
         ...t,
         index: idx + 1,
         id: `BackTrack${idx + 1}`,
@@ -193,7 +193,7 @@ export const BackTrackModal: React.FC<BackTrackModalProps> = ({
               <h2 className="text-sm sm:text-base font-bold text-white leading-tight flex items-center gap-2">
                 Song BackTracks
                 <span className="px-2 py-0.2 rounded-full text-[11px] font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  {validTracks.length}/5
+                  {validTracks.length}/10
                 </span>
               </h2>
               <p className="text-xs text-slate-400 truncate max-w-[280px] sm:max-w-md">
@@ -223,7 +223,7 @@ export const BackTrackModal: React.FC<BackTrackModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Edit3 className="w-4 h-4 text-purple-400" />
                   <span className="text-sm font-bold text-slate-100">
-                    {editingState.isNew ? `Add New BackTrack (${validTracks.length + 1}/5)` : `Edit ${editingState.originalId || `BackTrack ${editingState.index}`}`}
+                    {editingState.isNew ? `Add New BackTrack (${validTracks.length + 1}/10)` : `Edit ${editingState.originalId || `BackTrack ${editingState.index}`}`}
                   </span>
                 </div>
                 {!editingState.isNew && (
@@ -412,7 +412,7 @@ export const BackTrackModal: React.FC<BackTrackModalProps> = ({
             {!editingState && (
               <button
                 type="button"
-                disabled={validTracks.length >= 5}
+                disabled={validTracks.length >= 10}
                 onClick={() => setEditingState({
                   isNew: true,
                   index: validTracks.length + 1,
@@ -420,12 +420,12 @@ export const BackTrackModal: React.FC<BackTrackModalProps> = ({
                   url: '',
                 })}
                 className="px-3 py-1 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all active:scale-95"
-                title={validTracks.length >= 5 ? 'Maximum 5 backtracks limit reached' : 'Add new accompaniment backtrack'}
+                title={validTracks.length >= 10 ? 'Maximum 10 backtracks limit reached' : 'Add new accompaniment backtrack'}
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Add New</span>
                 <span className="text-[10px] opacity-80">
-                  {validTracks.length >= 5 ? '(Max 5)' : `(${validTracks.length}/5)`}
+                  {validTracks.length >= 10 ? '(Max 10)' : `(${validTracks.length}/10)`}
                 </span>
               </button>
             )}

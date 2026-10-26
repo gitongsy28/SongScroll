@@ -70,20 +70,66 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
   const numMeasures = parsedMeasuresByLine[0]?.measures.length || 1;
   const canWrap = tabWrapMode === 'wrap' && numMeasures > 1 && parsedMeasuresByLine.every(p => p.measures.length === numMeasures);
 
-  // If wrapping is enabled, group measures so that each group fits within container
-  let wrappedGroups: string[][] = [];
+  // When wrapping is enabled, concatenate measures on the same row until screen/container width is reached!
+  interface WrappedMeasureGroup {
+    label: string;
+    lines: string[];
+  }
+
+  let wrappedGroups: WrappedMeasureGroup[] = [];
   if (canWrap) {
-    // For each measure index m, build the block of strings
-    // e.g. measure m = lines with `label|measures[m]|`
+    const availWidth = containerWidth > 0 ? containerWidth - 36 : 600;
+    // Monospace character width is ~8px at 13px font size
+    const maxCharsPerRow = Math.max(28, Math.floor(availWidth / 8.0));
+
+    let currentMeasureIndices: number[] = [];
+    let currentLineLength = 0;
+
     for (let m = 0; m < numMeasures; m++) {
-      const measureLines = parsedMeasuresByLine.map((p) => `${p.label}|${p.measures[m]}|`);
-      wrappedGroups.push(measureLines);
+      const measureWidth = parsedMeasuresByLine[0]?.measures[m]?.length || 0;
+      // If adding this measure exceeds row capacity (and current row already has at least 1 measure)
+      if (currentMeasureIndices.length > 0 && (currentLineLength + measureWidth + 1) > maxCharsPerRow) {
+        // Finalize current row of measures
+        const startNum = currentMeasureIndices[0] + 1;
+        const endNum = currentMeasureIndices[currentMeasureIndices.length - 1] + 1;
+        const groupLabel = startNum === endNum ? `Measure ${startNum}` : `Measures ${startNum}–${endNum}`;
+        const groupLines = parsedMeasuresByLine.map((p) => {
+          const measuresStr = currentMeasureIndices.map((idx) => p.measures[idx] || '').join('|');
+          return `${p.label}|${measuresStr}|`;
+        });
+        wrappedGroups.push({ label: groupLabel, lines: groupLines });
+
+        // Start new row with measure m
+        currentMeasureIndices = [m];
+        const labelLen = parsedMeasuresByLine[0]?.label?.length || 1;
+        currentLineLength = labelLen + 1 + measureWidth + 1;
+      } else {
+        // Append measure to current row
+        if (currentMeasureIndices.length === 0) {
+          const labelLen = parsedMeasuresByLine[0]?.label?.length || 1;
+          currentLineLength = labelLen + 1;
+        }
+        currentMeasureIndices.push(m);
+        currentLineLength += measureWidth + 1;
+      }
+    }
+
+    // Flush any remaining measures in last row
+    if (currentMeasureIndices.length > 0) {
+      const startNum = currentMeasureIndices[0] + 1;
+      const endNum = currentMeasureIndices[currentMeasureIndices.length - 1] + 1;
+      const groupLabel = startNum === endNum ? `Measure ${startNum}` : `Measures ${startNum}–${endNum}`;
+      const groupLines = parsedMeasuresByLine.map((p) => {
+        const measuresStr = currentMeasureIndices.map((idx) => p.measures[idx] || '').join('|');
+        return `${p.label}|${measuresStr}|`;
+      });
+      wrappedGroups.push({ label: groupLabel, lines: groupLines });
     }
   }
 
   // Find maximum characters per line in this tab section
   const maxLineLength = canWrap 
-    ? Math.max(...wrappedGroups.flatMap(g => g.map(l => l.length)), 24)
+    ? Math.max(...wrappedGroups.flatMap(g => g.lines.map(l => l.length)), 24)
     : Math.max(...cleanLines.map((l) => l.length), 32);
 
   // Character width ratio in Consolas/monospace with ~0.04em letter-spacing is roughly 0.615
@@ -143,12 +189,12 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
 
       {/* Tab Strings Block */}
       {canWrap ? (
-        <div className="space-y-2">
+        <div className="space-y-3">
           {wrappedGroups.map((group, gIdx) => (
             <div key={gIdx} className="overflow-x-auto">
-              {numMeasures > 1 && (
-                <div className="text-[10px] font-sans font-semibold text-slate-500 mb-0.5">
-                  Measure {gIdx + 1}
+              {wrappedGroups.length > 1 && (
+                <div className="text-[10px] font-sans font-bold text-slate-500 mb-0.5">
+                  {group.label}
                 </div>
               )}
               <pre
@@ -163,7 +209,7 @@ export const TabDiagram: React.FC<TabDiagramProps> = ({
                   color: '#000000',
                 }}
               >
-                {group.join('\n')}
+                {group.lines.join('\n')}
               </pre>
             </div>
           ))}

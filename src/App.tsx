@@ -14,12 +14,14 @@ import {
   downloadSongFile
 } from './utils/storage';
 import { syncSongsFromGitHubUrl } from './utils/githubSync';
-import { parseChordPro } from './utils/chordpro';
+import { createSongFromChordPro, parseChordPro } from './utils/chordpro';
 import { SongList } from './components/SongList';
 import { SongViewer } from './components/SongViewer';
 import { DirectoryPickerModal } from './components/DirectoryPickerModal';
 import { ChordEditorModal } from './components/ChordEditorModal';
 import { AndroidInstallModal } from './components/AndroidInstallModal';
+import { GlobalSettingsModal } from './components/GlobalSettingsModal';
+import { CreateSongMethodModal } from './components/CreateSongMethodModal';
 
 export default function App() {
   const [songs, setSongs] = useState<Song[]>([]);
@@ -31,8 +33,10 @@ export default function App() {
 
   // Modals state
   const [isDirectoryModalOpen, setIsDirectoryModalOpen] = useState<boolean>(false);
+  const [isCreateMethodModalOpen, setIsCreateMethodModalOpen] = useState<boolean>(false);
   const [isEditorModalOpen, setIsEditorModalOpen] = useState<boolean>(false);
   const [isAndroidModalOpen, setIsAndroidModalOpen] = useState<boolean>(false);
+  const [isGlobalSettingsOpen, setIsGlobalSettingsOpen] = useState<boolean>(false);
   const [songToEdit, setSongToEdit] = useState<Song | null>(null);
   const [saveToast, setSaveToast] = useState<{ 
     message: string; 
@@ -120,8 +124,13 @@ export default function App() {
 
   // Add / Edit Song
   const handleOpenNewSong = () => {
-    setSongToEdit(null);
-    setIsEditorModalOpen(true);
+    setIsCreateMethodModalOpen(true);
+  };
+
+  const handleAutoSongCreated = async (rawChordPro: string) => {
+    const newSong = createSongFromChordPro(rawChordPro);
+    await handleSaveSong(newSong);
+    handleSelectSong(newSong);
   };
 
   const handleEditSong = (song: Song) => {
@@ -207,9 +216,18 @@ export default function App() {
           onEditSong={handleEditSong}
           onDeleteSong={handleDeleteSong}
           onOpenAndroidModal={() => setIsAndroidModalOpen(true)}
+          onOpenGlobalSettings={() => setIsGlobalSettingsOpen(true)}
           repoConfig={repoConfig}
         />
       )}
+
+      {/* Global System Settings Modal */}
+      <GlobalSettingsModal
+        isOpen={isGlobalSettingsOpen}
+        onClose={() => setIsGlobalSettingsOpen(false)}
+        settings={viewerSettings}
+        onUpdateSettings={handleUpdateSettings}
+      />
 
       {/* Local Drive Directory Settings Modal */}
       <DirectoryPickerModal
@@ -219,6 +237,17 @@ export default function App() {
         onConfigChange={(newCfg) => setRepoConfig(newCfg)}
         onSongsUpdated={(updatedSongs) => setSongs(updatedSongs)}
         currentSongCount={songs.length}
+      />
+
+      {/* Create Song Method (Auto vs Manual) Modal */}
+      <CreateSongMethodModal
+        isOpen={isCreateMethodModalOpen}
+        onClose={() => setIsCreateMethodModalOpen(false)}
+        onSelectManual={() => {
+          setSongToEdit(null);
+          setIsEditorModalOpen(true);
+        }}
+        onAutoSongCreated={handleAutoSongCreated}
       />
 
       {/* Add / Edit ChordPro Modal */}

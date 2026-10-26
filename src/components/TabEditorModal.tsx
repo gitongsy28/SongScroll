@@ -765,19 +765,17 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
         return;
       }
 
-      // Backspace key: remove cell on the left and shift all text on the right of cursor left
+      // Backspace key: remove cell on the left and shift remaining text left ON THIS ROW ONLY
       if (e.key === 'Backspace') {
         e.preventDefault();
         if (selection) {
           handleBlockDelete();
         } else if (colIdx > 0) {
           const newMeasures = JSON.parse(JSON.stringify(measures));
-          for (let r = 0; r < newMeasures[measureIdx].length; r++) {
-            newMeasures[measureIdx][r].splice(colIdx - 1, 1);
-            if (newMeasures[measureIdx][r].length === 0) {
-              newMeasures[measureIdx][r].push('-');
-            }
-          }
+          // Delete cell to the left on this string only
+          newMeasures[measureIdx][rowIdx].splice(colIdx - 1, 1);
+          // Pad end of this string with '-' to maintain equal measure width
+          newMeasures[measureIdx][rowIdx].push('-');
           pushHistory(newMeasures);
           setCursor({ measureIdx, rowIdx, colIdx: colIdx - 1 });
         }
@@ -898,28 +896,6 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
             </button>
           </div>
         </div>
-
-        {/* Notification Toast */}
-        {notification && (
-          <div 
-            className={`px-4 py-2 text-xs font-semibold flex items-center gap-2 border-b select-none transition-all ${
-              notification.type === 'error'
-                ? 'bg-rose-950/90 text-rose-200 border-rose-800'
-                : notification.type === 'success'
-                ? 'bg-emerald-950/90 text-emerald-200 border-emerald-800'
-                : 'bg-sky-950/90 text-sky-200 border-sky-800'
-            }`}
-          >
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span className="flex-1">{notification.message}</span>
-            <button 
-              onClick={() => setNotification(null)}
-              className="text-xs opacity-70 hover:opacity-100"
-            >
-              ✕
-            </button>
-          </div>
-        )}
 
         {/* Section Config Bar: Title & Instrument */}
         <div className="px-4 py-2 bg-slate-900 border-b border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
@@ -1154,7 +1130,7 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
         <div className="flex-1 overflow-x-auto overflow-y-auto p-4 bg-slate-950">
           <div className="inline-flex flex-col min-w-full pb-4">
             {/* Measure Column Headers */}
-            <div className="flex items-center pl-8 mb-1.5">
+            <div className="flex items-center pl-5 mb-1">
               {measures.map((m, mIdx) => {
                 const cols = m[0]?.length || 0;
                 const isActive = cursor.measureIdx === mIdx;
@@ -1162,32 +1138,32 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
                   <button
                     key={mIdx}
                     type="button"
-                    className={`flex items-center justify-between px-3 py-1 mr-2 rounded-t-lg border-t border-x text-xs font-mono select-none transition-colors cursor-pointer ${
+                    className={`flex items-center justify-between px-2 py-0.5 mr-1.5 rounded-t-lg border-t border-x text-[11px] font-mono select-none transition-colors cursor-pointer ${
                       isActive
                         ? 'bg-white text-black border-slate-300 font-bold shadow-xs'
                         : 'bg-slate-900 text-slate-400 border-slate-800 hover:bg-slate-800'
                     }`}
-                    style={{ minWidth: `${cols * 22 + 16}px` }}
+                    style={{ minWidth: `${cols * 9 + 8}px` }}
                     onClick={() => setCursor((prev) => ({ ...prev, measureIdx: mIdx, colIdx: 0 }))}
                   >
-                    <span>Measure {mIdx + 1}</span>
-                    <span className="text-[10px] opacity-70">({cols} cols)</span>
+                    <span>M{mIdx + 1}</span>
+                    <span className="text-[10px] opacity-70">({cols})</span>
                   </button>
                 );
               })}
             </div>
 
-            {/* Fretboard Grid: PURE WHITE BACKGROUND, BLACK TEXT/LINES, NO HORIZONTAL BORDER LINES */}
-            <div className="flex flex-col border border-slate-300 rounded-xl bg-white shadow-xs p-2 overflow-x-auto">
+            {/* Fretboard Grid: Text Editor Style (Pure White background, tight monospace cells, zero margins) */}
+            <div className="flex flex-col border border-slate-300 rounded-xl bg-white shadow-xs p-2.5 overflow-x-auto">
               {stringLabels.map((stringLabel, rIdx) => (
-                <div key={rIdx} className="flex items-center">
+                <div key={rIdx} className="flex items-center h-[18px]">
                   {/* String Tuning Label */}
-                  <div className="w-6 h-6 flex items-center justify-center font-mono font-bold text-xs text-black shrink-0 mr-1 select-none">
+                  <div className="w-4 h-[18px] flex items-center justify-center font-mono font-bold text-[13px] text-black shrink-0 select-none">
                     {stringLabel}
                   </div>
 
                   {/* Measures Side-by-Side */}
-                  <div className="flex items-center">
+                  <div className="flex items-center h-[18px]">
                     {measures.map((m, mIdx) => {
                       const rowCells = m[rIdx] || [];
                       const isMeasureActive = cursor.measureIdx === mIdx;
@@ -1195,14 +1171,14 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
                       return (
                         <React.Fragment key={mIdx}>
                           {/* Starting Barline for measure */}
-                          <div className="w-2 h-6 flex items-center justify-center font-mono font-bold text-black select-none text-xs">
+                          <div className="w-[7px] h-[18px] flex items-center justify-center font-mono font-bold text-black select-none text-[13px]">
                             |
                           </div>
 
-                          {/* Measure Cells Grid: NO horizontal border lines, strings are dashes */}
+                          {/* Measure Cells Grid: No margins, text-editor character pitch */}
                           <div 
-                            className={`flex items-center transition-colors ${
-                              isMeasureActive ? 'bg-amber-50/40' : 'bg-transparent'
+                            className={`flex items-center h-[18px] transition-colors ${
+                              isMeasureActive ? 'bg-amber-50/50' : 'bg-transparent'
                             }`}
                           >
                             {rowCells.map((cellChar, cIdx) => {
@@ -1222,7 +1198,7 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
                               const isNumber = /^[0-9]$/.test(cellChar);
                               const isTechnique = /^[hpbr/\\~xX<>t()]$/.test(cellChar);
 
-                              let cellColor = 'text-slate-700 font-bold';
+                              let cellColor = 'text-slate-800 font-bold';
                               if (isNumber) cellColor = 'text-black font-extrabold';
                               else if (isTechnique) cellColor = 'text-blue-700 font-bold';
                               else if (cellChar !== '-') cellColor = 'text-emerald-700 font-bold';
@@ -1256,16 +1232,16 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
                                   onMouseUp={() => {
                                     setIsSelecting(false);
                                   }}
-                                  className={`w-5 h-6 sm:w-5.5 sm:h-6 flex items-center justify-center font-mono text-xs select-none cursor-pointer transition-all ${cellColor} ${
+                                  className={`w-[8.5px] sm:w-[9px] h-[18px] flex items-center justify-center font-mono text-[13px] select-none cursor-pointer leading-none p-0 m-0 transition-colors ${cellColor} ${
                                     isCursor
-                                      ? 'bg-amber-300 text-black font-black ring-2 ring-amber-500 rounded-xs shadow-xs z-10 scale-105'
+                                      ? 'bg-amber-400 text-slate-950 font-black ring-1 ring-amber-500 z-10'
                                       : isSelected
-                                      ? 'bg-sky-200 text-sky-950 ring-1 ring-sky-400 font-bold'
+                                      ? 'bg-sky-200 text-sky-950 font-bold'
                                       : 'hover:bg-slate-100'
                                   }`}
                                   style={{
                                     fontFamily: 'Consolas, "Liberation Mono", Menlo, Monaco, "Courier New", monospace',
-                                    letterSpacing: '0.04em',
+                                    letterSpacing: '0.02em',
                                   }}
                                   title={`[${stringLabel}] Col ${cIdx + 1}: ${cellChar}`}
                                 >
@@ -1279,7 +1255,7 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
                     })}
 
                     {/* Closing Barline */}
-                    <div className="w-2 h-6 flex items-center justify-center font-mono font-bold text-black select-none ml-0.5 text-xs">
+                    <div className="w-[7px] h-[18px] flex items-center justify-center font-mono font-bold text-black select-none text-[13px]">
                       |
                     </div>
                   </div>
@@ -1308,6 +1284,29 @@ export const TabEditorModal: React.FC<TabEditorModalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Bottom Action Message Row (placed at the bottom of the screen to prevent jumping) */}
+        {notification && (
+          <div 
+            className={`px-4 py-2 text-xs font-semibold flex items-center gap-2 border-t select-none transition-all ${
+              notification.type === 'error'
+                ? 'bg-rose-950 text-rose-200 border-rose-800'
+                : notification.type === 'success'
+                ? 'bg-emerald-950 text-emerald-200 border-emerald-800'
+                : 'bg-sky-950 text-sky-200 border-sky-800'
+            }`}
+          >
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span className="flex-1">{notification.message}</span>
+            <button 
+              type="button"
+              onClick={() => setNotification(null)}
+              className="text-xs opacity-70 hover:opacity-100 px-1 cursor-pointer"
+            >
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Bottom Footer Actions */}
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 bg-slate-950 border-t border-slate-800">

@@ -29,6 +29,10 @@ export const DEFAULT_VIEWER_SETTINGS: ViewerSettings = {
   instrument: 'guitar',
   measureInsertWidth: 20,
   tabWrapMode: 'fit',
+  showChordDiagrams: true,
+  showTabDiagrams: true,
+  showChordNames: true,
+  showSummaryOnly: false,
 };
 
 export const DEFAULT_REPO_CONFIG: RepositoryConfig = {
