@@ -60,10 +60,27 @@ export const CreateSongMethodModal: React.FC<CreateSongMethodModalProps> = ({
         }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get('content-type') || '';
+      let data: any = null;
 
-      if (!response.ok || data.error) {
-        throw new Error(data.error || 'Failed to search and generate song');
+      if (contentType.includes('application/json')) {
+        data = await response.json();
+      } else {
+        const text = await response.text();
+        console.error('Non-JSON response from /api/auto-create-song:', response.status, text.slice(0, 300));
+        throw new Error(
+          response.status === 404
+            ? 'API service is starting up. Please try again or switch to Manual template.'
+            : `Server returned unexpected response (${response.status}). Please try again or switch to Manual template.`
+        );
+      }
+
+      if (!response.ok || !data || data.error) {
+        throw new Error(data?.error || `Failed to search and generate song (${response.status})`);
+      }
+
+      if (!data.chordPro) {
+        throw new Error('No song content was returned by the generator');
       }
 
       onClose();
@@ -239,9 +256,21 @@ export const CreateSongMethodModal: React.FC<CreateSongMethodModalProps> = ({
 
           {/* Error Message */}
           {error && (
-            <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-              <span>{error}</span>
+            <div className="p-3 bg-rose-950/50 border border-rose-800/60 rounded-xl text-xs text-rose-300 flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setMethod('manual');
+                }}
+                className="shrink-0 px-2.5 py-1 bg-rose-900/60 hover:bg-rose-800/80 text-rose-200 border border-rose-700/60 rounded-lg text-[11px] font-semibold transition-colors"
+              >
+                Use Manual
+              </button>
             </div>
           )}
         </div>

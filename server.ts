@@ -82,7 +82,23 @@ function formatDurationMinutes(seconds?: number): string {
   return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
 }
 
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Health check endpoint
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', server: 'SongScroll full-stack', timestamp: Date.now() });
+});
+
 app.post('/api/auto-create-song', async (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
   try {
     const { title, artist } = req.body as AutoCreateRequest;
 
@@ -144,22 +160,60 @@ ${lrcContextPrompt}
 
 Output ONLY the raw ChordPro text inside a single \`\`\`chordpro code block, with no conversational fluff.`;
 
-    const aiResponse = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }],
-        temperature: 0.2,
-      },
-    });
+    let chordProText = '';
 
-    let rawOutput = aiResponse.text || '';
+    try {
+      if (!process.env.GEMINI_API_KEY) {
+        throw new Error('GEMINI_API_KEY environment variable is not set');
+      }
 
-    // Strip markdown code fences if wrapped
-    const match = rawOutput.match(/```(?:chordpro|text)?\s*([\s\S]*?)\s*```/i);
-    let chordProText = match ? match[1].trim() : rawOutput.trim();
+      let aiResponse;
+      try {
+        aiResponse = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            tools: [{ googleSearch: {} }],
+            temperature: 0.2,
+          },
+        });
+      } catch (groundingError) {
+        console.warn('Search grounding failed, attempting ungrounded generation:', groundingError);
+        aiResponse = await ai.models.generateContent({
+          model: 'gemini-3.8-flash',
+          contents: prompt,
+          config: {
+            temperature: 0.2,
+          },
+        });
+      }
 
-    // If Gemini didn't include duration or era, ensure sensible defaults
+      const rawOutput = aiResponse.text || '';
+      const match = rawOutput.match(/```(?:chordpro|text)?\s*([\s\S]*?)\s*```/i);
+      chordProText = match ? match[1].trim() : rawOutput.trim();
+    } catch (aiError: any) {
+      console.warn('Gemini generation failed, checking fallback to LRCLIB lyrics:', aiError);
+      if (lrcData?.syncedLyrics || lrcData?.plainLyrics) {
+        const lines = (lrcData.syncedLyrics || lrcData.plainLyrics || '').trim();
+        chordProText = `{title: ${songTitle}}
+{artist: ${songArtist || 'Unknown Artist'}}
+{key: C}
+{tempo: 120}
+{duration: ${formatDurationMinutes(lrcData.duration)}}
+{meta: ScrollSpeed : 18}
+
+{meta: BackTrack1 : Full Song (Search) : https://www.youtube.com/results?search_query=${encodeURIComponent(songTitle + ' ' + songArtist + ' official audio')} : }
+{meta: BackTrack2 : Karaoke (Search) : https://www.youtube.com/results?search_query=${encodeURIComponent(songTitle + ' ' + songArtist + ' karaoke instrumental')} : }
+{meta: BackTrack3 : Back Track w/o Vocal : https://www.youtube.com/results?search_query=${encodeURIComponent(songTitle + ' ' + songArtist + ' backing track no guitar')} : }
+{meta: BackTrack4 : Back Track with Vocal : https://www.youtube.com/results?search_query=${encodeURIComponent(songTitle + ' ' + songArtist + ' backing track')} : }
+
+
+${lines}`;
+      } else {
+        throw aiError;
+      }
+    }
+
     if (!chordProText.includes('{title:')) {
       chordProText = `{title: ${songTitle}}\n{artist: ${songArtist}}\n` + chordProText;
     }
@@ -168,7 +222,7 @@ Output ONLY the raw ChordPro text inside a single \`\`\`chordpro code block, wit
       success: true,
       chordPro: chordProText,
       hasLrcTimestamps: /\[\d{1,2}:\d{2}(?:\.\d{1,3})?\]/.test(chordProText),
-      source: lrcData?.syncedLyrics ? 'lrclib+gemini' : 'gemini-grounded',
+      source: lrcData?.syncedLyrics ? 'lrclib+gemini' : 'gemini',
     });
   } catch (error: any) {
     console.error('Error generating song:', error);
@@ -190,6 +244,19 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
+
+    // Fallback for dev mode SPA HTML serving
+    app.use('*', async (req, res, next) => {
+      if (req.method !== 'GET') return next();
+      try {
+        const fs = await import('fs');
+        let template = fs.readFileSync(path.resolve('index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(req.originalUrl, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
+    });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
