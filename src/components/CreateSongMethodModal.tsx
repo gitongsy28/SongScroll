@@ -53,6 +53,7 @@ export const CreateSongMethodModal: React.FC<CreateSongMethodModalProps> = ({
     try {
       const response = await fetch('/api/auto-create-song', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(),
