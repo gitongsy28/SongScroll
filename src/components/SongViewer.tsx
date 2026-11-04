@@ -390,10 +390,9 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       exactScrollTopRef.current = containerRef.current.scrollTop;
     }
 
-    if (lrcStartTimeRef.current === null) {
-      lrcStartTimeRef.current = performance.now();
-      lrcStartOffsetSecRef.current = currentAudioTimeRef.current || 0;
-    }
+    // Capture starting clock and initial offset
+    const scrollSessionStartClock = performance.now();
+    const scrollSessionStartOffset = currentAudioTimeRef.current || 0;
 
     const scrollStep = (timestamp: number) => {
       if (!lastTimestampRef.current) {
@@ -408,13 +407,11 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           if (hasLrcTimestamps) {
             // LRC Timestamp Synchronized Auto-Scroll Mode
             let currentSeconds = 0;
-            if (isAudioPlayingRef.current) {
+            if (isAudioPlayingRef.current && currentAudioTimeRef.current > 0) {
               currentSeconds = currentAudioTimeRef.current;
             } else {
-              if (lrcStartTimeRef.current === null) {
-                lrcStartTimeRef.current = timestamp;
-              }
-              currentSeconds = lrcStartOffsetSecRef.current + (timestamp - lrcStartTimeRef.current) / 1000;
+              // High-precision clock based on performance.now()
+              currentSeconds = scrollSessionStartOffset + (performance.now() - scrollSessionStartClock) / 1000;
             }
 
             const timestampNodes = containerRef.current.querySelectorAll<HTMLElement>(
@@ -422,7 +419,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             );
 
             if (timestampNodes.length > 0) {
-              const items: { time: number; top: number }[] = [];
+              const items: { time: number; top: number; node: HTMLElement }[] = [];
               const containerRect = containerRef.current.getBoundingClientRect();
               const cScrollTop = containerRef.current.scrollTop;
 
@@ -430,21 +427,23 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 const sec = parseFloat(node.getAttribute('data-time-seconds') || '0');
                 const nodeRect = node.getBoundingClientRect();
                 const nodeTop = nodeRect.top - containerRect.top + cScrollTop;
-                items.push({ time: sec, top: nodeTop });
+                items.push({ time: sec, top: nodeTop, node });
               });
 
               items.sort((a, b) => a.time - b.time);
 
               const containerHeight = containerRef.current.clientHeight;
-              const focalOffset = containerHeight * 0.35;
-              const maxScroll = containerRef.current.scrollHeight - containerHeight;
+              const focalOffset = containerHeight * 0.32;
+              const maxScroll = Math.max(0, containerRef.current.scrollHeight - containerHeight);
 
               let targetTop = 0;
               if (currentSeconds <= items[0].time) {
+                // Intro lead-in before first timestamp
                 const ratio = Math.max(0, currentSeconds / Math.max(items[0].time, 0.1));
                 const firstTarget = Math.max(0, items[0].top - focalOffset);
                 targetTop = ratio * firstTarget;
               } else if (currentSeconds >= items[items.length - 1].time) {
+                // Outro after last timestamp: continue scrolling down at effective speed
                 const lastItem = items[items.length - 1];
                 const lastTarget = Math.max(0, lastItem.top - focalOffset);
                 const overTime = currentSeconds - lastItem.time;
@@ -467,11 +466,12 @@ export const SongViewer: React.FC<SongViewerProps> = ({
               }
 
               targetTop = Math.max(0, Math.min(maxScroll, targetTop));
-              const lerpFactor = Math.min(1, deltaSeconds * 8);
+              // Fast responsive interpolation (no sluggish lag or freezing)
+              const lerpFactor = Math.min(1, deltaSeconds * 12);
               exactScrollTopRef.current += (targetTop - exactScrollTopRef.current) * lerpFactor;
               containerRef.current.scrollTop = exactScrollTopRef.current;
             } else {
-              // Fallback to speed
+              // Fallback to speed if no timestamp elements rendered
               const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
               exactScrollTopRef.current += scrollAmount;
               containerRef.current.scrollTop = exactScrollTopRef.current;
@@ -2952,7 +2952,11 @@ const RenderLine: React.FC<RenderLineProps> = ({
   }
 
   return (
-    <div className="my-1 opacity-80">
+    <div 
+      data-line-index={lineIndex}
+      data-time-seconds={line.timeSeconds !== undefined ? line.timeSeconds : ''}
+      className="my-1 opacity-80"
+    >
       {line.raw || ''}
     </div>
   );
