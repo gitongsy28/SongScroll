@@ -11,7 +11,8 @@ import {
   Music,
   Video,
   Radio,
-  HardDrive
+  HardDrive,
+  Sliders
 } from 'lucide-react';
 import { BackTrackItem } from '../types';
 import { extractYouTubeId, getStreamableAudioUrl } from '../utils/chordpro';
@@ -21,6 +22,8 @@ interface BackTrackFloatingPlayerProps {
   onClose: () => void;
   onOpenInBrowser: (track: BackTrackItem) => void;
   onTimeUpdate?: (currentTime: number, isPlaying: boolean) => void;
+  onOpenResyncModal?: () => void;
+  seekToTime?: number | null;
 }
 
 export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = ({
@@ -28,6 +31,8 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
   onClose,
   onOpenInBrowser,
   onTimeUpdate,
+  onOpenResyncModal,
+  seekToTime,
 }) => {
   const [isMinimized, setIsMinimized] = useState<boolean>(false);
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
@@ -35,6 +40,17 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
   const [duration, setDuration] = useState<number>(0);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const audioRef = useRef<HTMLAudioElement>(null);
+
+  // External seek handler
+  useEffect(() => {
+    if (seekToTime !== undefined && seekToTime !== null && !isNaN(seekToTime)) {
+      setCurrentTime(seekToTime);
+      if (audioRef.current) {
+        audioRef.current.currentTime = seekToTime;
+      }
+      onTimeUpdate?.(seekToTime, isPlaying);
+    }
+  }, [seekToTime]);
 
   // Reset states when track changes
   useEffect(() => {
@@ -126,6 +142,17 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
             </button>
           )}
 
+          {onOpenResyncModal && (
+            <button
+              type="button"
+              onClick={onOpenResyncModal}
+              className="p-1 rounded-full text-amber-400 hover:text-amber-300 hover:bg-slate-800 transition-colors"
+              title="Resync LRC Timestamps to audio"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setIsMinimized(false)}
@@ -162,6 +189,17 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              {onOpenResyncModal && (
+                <button
+                  type="button"
+                  onClick={onOpenResyncModal}
+                  className="px-2 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300 font-bold text-[10px] flex items-center gap-1 transition-colors"
+                  title="Resync LRC Timestamps to this track"
+                >
+                  <Sliders className="w-3 h-3 text-amber-400" />
+                  <span>Resync LRC</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => onOpenInBrowser(track)}

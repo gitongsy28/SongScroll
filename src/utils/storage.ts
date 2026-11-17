@@ -33,6 +33,7 @@ export const DEFAULT_VIEWER_SETTINGS: ViewerSettings = {
   showTabDiagrams: true,
   showChordNames: true,
   showSummaryOnly: false,
+  activeScrollPosition: 'upper',
 };
 
 export const DEFAULT_REPO_CONFIG: RepositoryConfig = {

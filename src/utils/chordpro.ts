@@ -671,6 +671,7 @@ export function parseChordPro(chordProText: string): ParsedChordPro {
         raw: line,
         timestamp: lineTimestamp,
         timeSeconds: lineTimeSeconds,
+        sourceLineIndex: i,
       });
       continue;
     }
@@ -1916,3 +1917,96 @@ export function updateChordProBackTracks(rawChordPro: string, backtracks: BackTr
   lines.splice(insertIndex, 0, ...newDirectives);
   return lines.join('\n');
 }
+
+export function formatLrcTag(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const mins = Math.floor(clamped / 60);
+  const remSecs = clamped % 60;
+  const secs = Math.floor(remSecs);
+  const centisecs = Math.floor((remSecs - secs) * 100);
+  const padMin = mins.toString().padStart(2, '0');
+  const padSec = secs.toString().padStart(2, '0');
+  const padCenti = centisecs.toString().padStart(2, '0');
+  return `[${padMin}:${padSec}.${padCenti}]`;
+}
+
+/**
+ * Shifts all LRC timestamps in a raw ChordPro document by deltaSeconds.
+ * Automatically formats as [mm:ss.xx]. Clamps minimum time to 00:00.00.
+ */
+export function shiftLrcTimestamps(rawChordPro: string, deltaSeconds: number): string {
+  const lines = rawChordPro.split('\n');
+  const shiftedLines = lines.map((line) => {
+    const lrcMatch = line.match(/^\[(\d{1,2}):(\d{2}(?:\.\d{1,3})?)\]/);
+    if (!lrcMatch) return line;
+
+    const mins = parseInt(lrcMatch[1], 10);
+    const secs = parseFloat(lrcMatch[2]);
+    const currentTotalSec = mins * 60 + secs;
+    const newTotalSec = Math.max(0, currentTotalSec + deltaSeconds);
+
+    return formatLrcTag(newTotalSec) + line.slice(lrcMatch[0].length);
+  });
+
+  return shiftedLines.join('\n');
+}
+
+/**
+ * Sets or updates the LRC timestamp on targetSourceLineIndex to newTimeSeconds.
+ * Leaves lines BEFORE targetSourceLineIndex untouched.
+ * If calibrateSubsequent is true and the target line previously had a timestamp,
+ * shifts subsequent timestamped lines (after targetSourceLineIndex) by (newTimeSeconds - oldTimeSeconds),
+ * preserving the original durations between following lines.
+ */
+export function calibrateLrcFromLine(
+  rawChordPro: string,
+  targetSourceLineIndex: number,
+  newTimeSeconds: number,
+  calibrateSubsequent: boolean = true
+): string {
+  const lines = rawChordPro.split('\n');
+  if (targetSourceLineIndex < 0 || targetSourceLineIndex >= lines.length) {
+    return rawChordPro;
+  }
+
+  const lrcRegex = /^\[(\d{1,2}):(\d{2}(?:\.\d{1,3})?)\]/;
+  const targetLine = lines[targetSourceLineIndex];
+  const targetMatch = targetLine.match(lrcRegex);
+
+  let oldTargetTime: number | null = null;
+  if (targetMatch) {
+    oldTargetTime = parseInt(targetMatch[1], 10) * 60 + parseFloat(targetMatch[2]);
+  }
+
+  const clampedNewTime = Math.max(0, newTimeSeconds);
+  const newTag = formatLrcTag(clampedNewTime);
+
+  // Preserve exact leading/body text after any existing timestamp
+  if (targetMatch) {
+    lines[targetSourceLineIndex] = newTag + targetLine.slice(targetMatch[0].length);
+  } else {
+    const leadingWhitespace = targetLine.match(/^\s*/)?.[0] || '';
+    const bodyText = targetLine.slice(leadingWhitespace.length);
+    lines[targetSourceLineIndex] = `${leadingWhitespace}${newTag}${bodyText}`;
+  }
+
+  // Calibrate subsequent lines preserving relative intervals if target line had a previous timestamp
+  if (calibrateSubsequent && oldTargetTime !== null) {
+    const delta = clampedNewTime - oldTargetTime;
+    if (Math.abs(delta) > 0.001) {
+      let runningFloor = clampedNewTime;
+      for (let i = targetSourceLineIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        const m = line.match(lrcRegex);
+        if (!m) continue;
+        const t = parseInt(m[1], 10) * 60 + parseFloat(m[2]);
+        const shifted = Math.max(runningFloor, t + delta);
+        runningFloor = shifted;
+        lines[i] = formatLrcTag(shifted) + line.slice(m[0].length);
+      }
+    }
+  }
+
+  return lines.join('\n');
+}
+

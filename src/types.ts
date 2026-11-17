@@ -114,6 +114,7 @@ export interface ViewerSettings {
   showTabDiagrams?: boolean;   // [T] TAB diagrams (default: true)
   showChordNames?: boolean;    // [C] Chord names on top of lyrics (default: true)
   showSummaryOnly?: boolean;   // [S] Summary 'Hint' lyrics only (default: false)
+  activeScrollPosition?: 'middle' | 'upper'; // Active tracking line position: 'middle' (50%) or 'upper' (2/3 up from bottom / 33% from top)
 }
 
 export interface MetronomeState {

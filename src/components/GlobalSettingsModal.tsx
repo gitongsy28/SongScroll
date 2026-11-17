@@ -314,6 +314,52 @@ export const GlobalSettingsModal: React.FC<GlobalSettingsModalProps> = ({
                 </button>
               </div>
             </div>
+
+            {/* Active Scroll Line Position */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-white text-xs block">Active Scroll Line Position</span>
+                  <span className="text-[11px] text-slate-400">Screen position for line tracking and Scroll Pause trigger point</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ activeScrollPosition: 'middle' })}
+                  className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                    settings.activeScrollPosition === 'middle'
+                      ? 'bg-amber-500/15 border-amber-500/50 text-white'
+                      : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs">50% (Middle)</span>
+                    {settings.activeScrollPosition === 'middle' && (
+                      <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded font-black">ACTIVE</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Keep active line centered vertically in middle of screen</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onUpdateSettings({ activeScrollPosition: 'upper' })}
+                  className={`p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                    (settings.activeScrollPosition || 'upper') === 'upper'
+                      ? 'bg-amber-500/15 border-amber-500/50 text-white'
+                      : 'bg-slate-900/90 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-xs">2/3 Up Screen (Upper 1/3)</span>
+                    {(settings.activeScrollPosition || 'upper') === 'upper' && (
+                      <span className="text-[10px] bg-amber-400 text-slate-950 px-1.5 py-0.5 rounded font-black">ACTIVE</span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">Position line 2/3 up from bottom (more lyrics readable below)</div>
+                </button>
+              </div>
+            </div>
           </div>
 
           {/* SECTION 2: Tab and Instrument Preset */}

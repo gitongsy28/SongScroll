@@ -23,7 +23,9 @@ import {
   Timer,
   Check,
   Save,
-  MoveHorizontal
+  MoveHorizontal,
+  AlertTriangle,
+  Crosshair
 } from 'lucide-react';
 import { 
   BackTrackItem, 
@@ -47,6 +49,7 @@ import {
   parseChordPro, 
   reformatChordPro,
   serializeChordPro, 
+  shiftLrcTimestamps,
   transposeChord, 
   updateChordProDefineDirective,
   updateChordProScrollSpeed,
@@ -61,6 +64,7 @@ import { BackTrackModal } from './BackTrackModal';
 import { BackTrackFloatingPlayer } from './BackTrackFloatingPlayer';
 import { TabDiagram } from './TabDiagram';
 import { TabEditorModal } from './TabEditorModal';
+import { LrcResyncModal } from './LrcResyncModal';
 
 interface SongViewerProps {
   song: Song;
@@ -216,6 +220,10 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     return song.backtracks || song.parsed?.backtracks || parseChordPro(song.rawChordPro).backtracks || [];
   });
   const [activeFloatingTrack, setActiveFloatingTrack] = useState<BackTrackItem | null>(null);
+  const [showLrcResyncModal, setShowLrcResyncModal] = useState<boolean>(false);
+  const [flashedLineIndex, setFlashedLineIndex] = useState<number | null>(null);
+  const [seekTargetTime, setSeekTargetTime] = useState<number | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
 
   // Metronome tempo state (defaults to song tempo or 100)
   const [currentTempo, setCurrentTempo] = useState<number>(song.tempo || 100);
@@ -226,6 +234,9 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const exactScrollTopRef = useRef<number>(0);
   const isScrollingRef = useRef<boolean>(isScrolling);
   isScrollingRef.current = isScrolling;
+
+  // Active Scroll Line Position Ratio: 'middle' = 50%, 'upper' = 33.3% (2/3 up from bottom)
+  const activeLineRatio = (settings.activeScrollPosition || 'upper') === 'middle' ? 0.50 : 0.333;
 
   // Proportional Auto-Adjustment of Scroll Speed when Chord Diagrams are ON:
   // Mini chord diagrams expand vertical line height (~1.8x).
@@ -240,11 +251,26 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const effectiveScrollSpeedRef = useRef<number>(effectiveScrollSpeed);
   effectiveScrollSpeedRef.current = effectiveScrollSpeed;
 
-  // LRC Timestamps audio synchronization refs
+  // LRC Timestamps audio synchronization & running time display refs
   const currentAudioTimeRef = useRef<number>(0);
   const isAudioPlayingRef = useRef<boolean>(false);
   const lrcStartTimeRef = useRef<number | null>(null);
   const lrcStartOffsetSecRef = useRef<number>(0);
+  const lrcCurrentSecondsRef = useRef<number>(0);
+  const outroVelocityRef = useRef<number>(0);
+  const runningTimeElRef = useRef<HTMLSpanElement | null>(null);
+  const lastDisplayedSecRef = useRef<number>(-1);
+
+  const updateRunningTimeDisplay = useCallback((seconds: number) => {
+    const wholeSec = Math.max(0, Math.floor(isNaN(seconds) ? 0 : seconds));
+    if (lastDisplayedSecRef.current === wholeSec) return;
+    lastDisplayedSecRef.current = wholeSec;
+    if (runningTimeElRef.current) {
+      const m = Math.floor(wholeSec / 60);
+      const s = wholeSec % 60;
+      runningTimeElRef.current.textContent = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+    }
+  }, []);
 
   // Re-parse dynamically if user edits chords or directives
   const parsed: ParsedChordPro = useMemo(() => {
@@ -306,7 +332,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     // Re-arm any ScrollPause elements that have moved back below the trigger line
     const pauseElements = containerRef.current.querySelectorAll('[data-scroll-pause]');
     const containerRect = containerRef.current.getBoundingClientRect();
-    const triggerLine = containerRect.top + containerRect.height * 0.35;
+    const triggerLine = containerRect.top + containerRect.height * activeLineRatio;
     pauseElements.forEach((el) => {
       const elRect = el.getBoundingClientRect();
       const pauseId = el.getAttribute('data-pause-id') || 'pause-default';
@@ -381,7 +407,6 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         animationFrameRef.current = null;
       }
       lastTimestampRef.current = null;
-      lrcStartTimeRef.current = null;
       return;
     }
 
@@ -390,9 +415,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       exactScrollTopRef.current = containerRef.current.scrollTop;
     }
 
-    // Capture starting clock and initial offset
-    const scrollSessionStartClock = performance.now();
-    const scrollSessionStartOffset = currentAudioTimeRef.current || 0;
+    let lastClockTime = performance.now();
 
     const scrollStep = (timestamp: number) => {
       if (!lastTimestampRef.current) {
@@ -401,19 +424,25 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       const deltaSeconds = Math.min((timestamp - lastTimestampRef.current) / 1000, 0.1);
       lastTimestampRef.current = timestamp;
 
+      const now = performance.now();
+      const frameElapsed = Math.min((now - lastClockTime) / 1000, 0.1);
+      lastClockTime = now;
+
       if (containerRef.current && isScrollingRef.current) {
         // If currently paused by ScrollPause directive, wait without moving scrollTop
         if (!isScrollPausedRef.current) {
-          if (hasLrcTimestamps) {
-            // LRC Timestamp Synchronized Auto-Scroll Mode
-            let currentSeconds = 0;
-            if (isAudioPlayingRef.current && currentAudioTimeRef.current > 0) {
-              currentSeconds = currentAudioTimeRef.current;
-            } else {
-              // High-precision clock based on performance.now()
-              currentSeconds = scrollSessionStartOffset + (performance.now() - scrollSessionStartClock) / 1000;
-            }
+          // Advance unified running playback clock (uses audio time if active track playing, else local timer)
+          let currentSeconds = 0;
+          if (isAudioPlayingRef.current && currentAudioTimeRef.current > 0) {
+            lrcCurrentSecondsRef.current = currentAudioTimeRef.current;
+            currentSeconds = currentAudioTimeRef.current;
+          } else {
+            lrcCurrentSecondsRef.current += frameElapsed;
+            currentSeconds = lrcCurrentSecondsRef.current;
+          }
+          updateRunningTimeDisplay(currentSeconds);
 
+          if (hasLrcTimestamps) {
             const timestampNodes = containerRef.current.querySelectorAll<HTMLElement>(
               '[data-time-seconds]:not([data-time-seconds=""])'
             );
@@ -427,49 +456,82 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                 const sec = parseFloat(node.getAttribute('data-time-seconds') || '0');
                 const nodeRect = node.getBoundingClientRect();
                 const nodeTop = nodeRect.top - containerRect.top + cScrollTop;
-                items.push({ time: sec, top: nodeTop, node });
+                if (!isNaN(sec) && sec >= 0) {
+                  items.push({ time: sec, top: nodeTop, node });
+                }
               });
 
-              items.sort((a, b) => a.time - b.time);
+              if (items.length > 0) {
+                // Sort strictly by document position order (DOM top)
+                items.sort((a, b) => a.top - b.top);
 
-              const containerHeight = containerRef.current.clientHeight;
-              const focalOffset = containerHeight * 0.32;
-              const maxScroll = Math.max(0, containerRef.current.scrollHeight - containerHeight);
-
-              let targetTop = 0;
-              if (currentSeconds <= items[0].time) {
-                // Intro lead-in before first timestamp
-                const ratio = Math.max(0, currentSeconds / Math.max(items[0].time, 0.1));
-                const firstTarget = Math.max(0, items[0].top - focalOffset);
-                targetTop = ratio * firstTarget;
-              } else if (currentSeconds >= items[items.length - 1].time) {
-                // Outro after last timestamp: continue scrolling down at effective speed
-                const lastItem = items[items.length - 1];
-                const lastTarget = Math.max(0, lastItem.top - focalOffset);
-                const overTime = currentSeconds - lastItem.time;
-                targetTop = Math.min(maxScroll, lastTarget + overTime * (effectiveScrollSpeedRef.current || 20));
-              } else {
-                let k = 0;
-                for (let i = 0; i < items.length - 1; i++) {
-                  if (currentSeconds >= items[i].time && currentSeconds < items[i + 1].time) {
-                    k = i;
-                    break;
+                // Guarantee monotonic timestamps so an out-of-order or clamped tag never snaps k back to 0
+                let prevTime = 0;
+                for (let i = 0; i < items.length; i++) {
+                  if (items[i].time < prevTime) {
+                    items[i].time = prevTime;
+                  } else {
+                    prevTime = items[i].time;
                   }
                 }
-                const itemA = items[k];
-                const itemB = items[k + 1];
-                const dt = Math.max(0.01, itemB.time - itemA.time);
-                const ratio = Math.max(0, Math.min(1, (currentSeconds - itemA.time) / dt));
-                const topA = Math.max(0, itemA.top - focalOffset);
-                const topB = Math.max(0, itemB.top - focalOffset);
-                targetTop = topA + ratio * (topB - topA);
-              }
 
-              targetTop = Math.max(0, Math.min(maxScroll, targetTop));
-              // Fast responsive interpolation (no sluggish lag or freezing)
-              const lerpFactor = Math.min(1, deltaSeconds * 12);
-              exactScrollTopRef.current += (targetTop - exactScrollTopRef.current) * lerpFactor;
-              containerRef.current.scrollTop = exactScrollTopRef.current;
+                const containerHeight = containerRef.current.clientHeight;
+                const focalOffset = containerHeight * activeLineRatio;
+                const maxScroll = Math.max(0, containerRef.current.scrollHeight - containerHeight);
+
+                if (currentSeconds >= items[items.length - 1].time) {
+                  // Reached/passed last LRC timestamp: continue scrolling smoothly at the same pace
+                  // until reaching the very end of the file (maxScroll), then stop without resetting!
+                  const pace =
+                    outroVelocityRef.current > 0
+                      ? outroVelocityRef.current
+                      : effectiveScrollSpeedRef.current || 22;
+                  exactScrollTopRef.current = Math.min(maxScroll, exactScrollTopRef.current + pace * deltaSeconds);
+                  containerRef.current.scrollTop = exactScrollTopRef.current;
+                } else {
+                  let targetTop = 0;
+                  if (currentSeconds <= items[0].time) {
+                    // Intro lead-in before first timestamp
+                    const ratio = Math.max(0, currentSeconds / Math.max(items[0].time, 0.1));
+                    const firstTarget = Math.max(0, items[0].top - focalOffset);
+                    targetTop = ratio * firstTarget;
+                  } else {
+                    let k = 0;
+                    for (let i = 0; i < items.length - 1; i++) {
+                      if (currentSeconds >= items[i].time && currentSeconds <= items[i + 1].time) {
+                        k = i;
+                        break;
+                      }
+                    }
+                    const itemA = items[k];
+                    const itemB = items[k + 1];
+                    const dt = Math.max(0.05, itemB.time - itemA.time);
+                    const ratio = Math.max(0, Math.min(1, (currentSeconds - itemA.time) / dt));
+                    const topA = Math.max(0, itemA.top - focalOffset);
+                    const topB = Math.max(0, itemB.top - focalOffset);
+                    targetTop = topA + ratio * Math.max(0, topB - topA);
+
+                    // Record natural pixel/sec pace so outro after the last timestamp continues seamlessly
+                    if (itemB.time > itemA.time + 0.3 && itemB.top > itemA.top) {
+                      const instantPace = (itemB.top - itemA.top) / dt;
+                      const clampedPace = Math.max(10, Math.min(90, instantPace));
+                      outroVelocityRef.current =
+                        outroVelocityRef.current > 0
+                          ? outroVelocityRef.current * 0.85 + clampedPace * 0.15
+                          : clampedPace;
+                    }
+                  }
+
+                  targetTop = Math.max(0, Math.min(maxScroll, targetTop));
+                  const lerpFactor = Math.min(1, deltaSeconds * 12);
+                  exactScrollTopRef.current += (targetTop - exactScrollTopRef.current) * lerpFactor;
+                  containerRef.current.scrollTop = exactScrollTopRef.current;
+                }
+              } else {
+                const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
+                exactScrollTopRef.current += scrollAmount;
+                containerRef.current.scrollTop = exactScrollTopRef.current;
+              }
             } else {
               // Fallback to speed if no timestamp elements rendered
               const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
@@ -489,10 +551,10 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             setScrollProgress(Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100)));
           }
 
-          // Check if any ScrollPause element reached 2/3 up the scroll window (top 33% of window)
+          // Check if any ScrollPause element reached the Active Line Trigger
           const pauseElements = containerRef.current.querySelectorAll('[data-scroll-pause]');
           const containerRect = containerRef.current.getBoundingClientRect();
-          const triggerLine = containerRect.top + containerRect.height * 0.35;
+          const triggerLine = containerRect.top + containerRect.height * activeLineRatio;
 
           pauseElements.forEach((el) => {
             const pauseId = el.getAttribute('data-pause-id') || 'pause-default';
@@ -510,7 +572,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           });
 
           if (scrollTop + clientHeight >= scrollHeight - 2) {
-            // Reached bottom of song
+            // Reached end of song: stop scrolling cleanly with ending kept in view (do NOT reset to top)
             setIsScrolling(false);
             return;
           }
@@ -529,7 +591,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isScrolling, triggerScrollPause, hasLrcTimestamps]);
+  }, [isScrolling, triggerScrollPause, hasLrcTimestamps, activeLineRatio, updateRunningTimeDisplay]);
 
   // Restart scroll from top
   const handleRestart = () => {
@@ -538,12 +600,49 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       exactScrollTopRef.current = 0;
       setScrollProgress(0);
       triggeredPausesRef.current.clear();
+      lrcCurrentSecondsRef.current = 0;
+      currentAudioTimeRef.current = 0;
       lrcStartTimeRef.current = null;
       lrcStartOffsetSecRef.current = 0;
-      currentAudioTimeRef.current = 0;
+      outroVelocityRef.current = 0;
+      lastDisplayedSecRef.current = -1;
+      updateRunningTimeDisplay(0);
+      setSeekTargetTime(null);
+      setTimeout(() => setSeekTargetTime(0), 10);
       handleSkipPause();
     }
   };
+
+  // Reposition scroll so line aligns with Active Scroll Line Indicator
+  const handleRepositionToLine = useCallback((lineIndex: number, timeSeconds?: number) => {
+    if (!containerRef.current) return;
+    const lineEl = containerRef.current.querySelector<HTMLElement>(`[data-line-index="${lineIndex}"]`);
+    if (!lineEl) return;
+
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const lineRect = lineEl.getBoundingClientRect();
+    const cScrollTop = containerRef.current.scrollTop;
+    const lineTop = lineRect.top - containerRect.top + cScrollTop;
+
+    const focalOffset = containerRef.current.clientHeight * activeLineRatio;
+    const targetScrollTop = Math.max(0, lineTop - focalOffset);
+
+    containerRef.current.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+    exactScrollTopRef.current = targetScrollTop;
+
+    if (timeSeconds !== undefined && timeSeconds >= 0) {
+      lrcCurrentSecondsRef.current = timeSeconds;
+      currentAudioTimeRef.current = timeSeconds;
+      lastDisplayedSecRef.current = -1;
+      updateRunningTimeDisplay(timeSeconds);
+      if (activeFloatingTrack) {
+        setSeekTargetTime(timeSeconds);
+      }
+    }
+
+    setFlashedLineIndex(lineIndex);
+    setTimeout(() => setFlashedLineIndex(null), 1200);
+  }, [activeLineRatio, activeFloatingTrack, updateRunningTimeDisplay]);
 
   const handlePageUp = () => {
     if (containerRef.current) {
@@ -1552,6 +1651,33 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         id="lyrics-scroll-container"
         className="flex-1 overflow-y-auto px-4 sm:px-8 py-8 focus:outline-none select-text relative"
       >
+        {/* Active Scroll Line Indicator pinned at left border of the lyrics window */}
+        <div
+          id="active-scroll-line-indicator"
+          className="sticky left-0 w-0 h-0 z-30 pointer-events-none select-none"
+          style={{ top: `${activeLineRatio * 100}%` }}
+        >
+          {/* Running Scroll Time (mm:ss) directly above Active Scroll Line Indicator */}
+          <div className="absolute left-0 -top-9 flex items-center">
+            <span
+              ref={runningTimeElRef}
+              id="active-scroll-running-time"
+              className="font-mono text-xs sm:text-sm font-bold text-amber-300 bg-slate-900/90 border border-amber-500/40 px-1.5 py-0.5 rounded shadow-md tracking-tight"
+            >
+              00:00
+            </span>
+          </div>
+          <div className="absolute left-0 -top-3 flex items-center">
+            <div className="flex items-center gap-1 bg-amber-500/95 text-slate-950 font-black text-[9px] px-1.5 py-0.5 rounded-r shadow-lg border border-l-0 border-amber-300">
+              <span>▶</span>
+              <span className="hidden sm:inline font-mono tracking-wider">
+                {settings.activeScrollPosition === 'middle' ? '50%' : '2/3 UP'}
+              </span>
+            </div>
+            <div className="w-10 sm:w-20 h-[1.5px] bg-gradient-to-r from-amber-400/80 to-transparent" />
+          </div>
+        </div>
+
         <div className="max-w-4xl mx-auto space-y-6 pb-40">
           {/* Song Header Info Card */}
           <div className="border-b border-slate-800/50 pb-4">
@@ -1734,6 +1860,8 @@ export const SongViewer: React.FC<SongViewerProps> = ({
                   setInsertCursorPos(0);
                   setIsAddChordMode(false);
                 }}
+                onRepositionToLine={handleRepositionToLine}
+                isFlashed={flashedLineIndex === idx}
               />
             ))}
           </div>
@@ -2173,13 +2301,50 @@ export const SongViewer: React.FC<SongViewerProps> = ({
             </button>
           </div>
 
+          {/* Active Scroll Line Position Setting */}
+          <div className="space-y-1.5 pt-1 border-t border-slate-800">
+            <div className="flex justify-between text-slate-300 text-xs">
+              <span>Active Scroll Line Position:</span>
+              <span className="font-mono text-amber-400 font-bold">
+                {settings.activeScrollPosition === 'middle' ? '50% (Middle)' : '2/3 Up Screen'}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ activeScrollPosition: 'middle' })}
+                className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                  settings.activeScrollPosition === 'middle'
+                    ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                    : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                50% (Middle)
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ activeScrollPosition: 'upper' })}
+                className={`py-1.5 px-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                  (settings.activeScrollPosition || 'upper') === 'upper'
+                    ? 'bg-amber-500/20 border-amber-400 text-amber-300'
+                    : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                2/3 Up Screen
+              </button>
+            </div>
+            <p className="text-[10px] text-slate-400">
+              Indicator arrow on left edge & Scroll Pause trigger point.
+            </p>
+          </div>
+
           {/* Actions & Danger Zone */}
           <div className="pt-2 border-t border-slate-800 space-y-2">
             <div className="flex items-center justify-between">
               <button
                 type="button"
                 onClick={handleExportTransposed}
-                className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[11px] font-medium"
+                className="text-amber-400 hover:text-amber-300 flex items-center gap-1 text-[11px] font-medium cursor-pointer"
               >
                 <Download className="w-3.5 h-3.5" />
                 Export Transposed .cho
@@ -2187,7 +2352,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
               <button
                 type="button"
                 onClick={() => onEditSong(song)}
-                className="text-sky-400 hover:text-sky-300 flex items-center gap-1 text-[11px] font-medium"
+                className="text-sky-400 hover:text-sky-300 flex items-center gap-1 text-[11px] font-medium cursor-pointer"
               >
                 <Edit className="w-3.5 h-3.5" />
                 Edit Song Text
@@ -2196,21 +2361,48 @@ export const SongViewer: React.FC<SongViewerProps> = ({
 
             {onDeleteSong && (
               <div className="pt-2 border-t border-slate-800/80">
-                <button
-                  id="settings-delete-song-btn"
-                  type="button"
-                  onClick={() => {
-                    if (confirm(`Are you sure you want to delete "${song.title}" from your SongBook?\n\nThis will remove the song from your active repository.`)) {
-                      onDeleteSong(song.id);
-                      onBack();
-                    }
-                  }}
-                  className="w-full py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors text-xs"
-                  title="Delete this song from SongBook"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-                  Delete Song from SongBook
-                </button>
+                {showDeleteConfirm ? (
+                  <div className="bg-rose-950/60 border border-rose-500/50 rounded-xl p-3 space-y-2 text-xs animate-in fade-in">
+                    <div className="flex items-center gap-1.5 text-rose-300 font-bold">
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                      <span>Confirm Delete Song</span>
+                    </div>
+                    <p className="text-slate-300 text-[11px] leading-relaxed">
+                      Are you sure you want to delete <strong className="text-rose-200">&quot;{song.title}&quot;</strong> from your SongBook?
+                    </p>
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDeleteSong(song.id);
+                          onBack();
+                        }}
+                        className="flex-1 py-1.5 px-3 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-bold text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Yes, Delete
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteConfirm(false)}
+                        className="py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg font-medium text-xs transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    id="settings-delete-song-btn"
+                    type="button"
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="w-full py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 active:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors text-xs cursor-pointer"
+                    title="Delete this song from SongBook"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+                    Delete Song from SongBook
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -2323,13 +2515,16 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           {/* Primary Play / Pause Action Button & LRC Sync indicator */}
           <div className="flex items-center gap-2">
             {hasLrcTimestamps && (
-              <div 
-                className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[11px] font-bold shadow-sm"
-                title="Song contains LRC timestamps for synchronized lyric scrolling"
+              <button
+                type="button"
+                onClick={() => setShowLrcResyncModal(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 text-[11px] font-bold shadow-sm transition-colors cursor-pointer"
+                title="Song contains LRC timestamps - Click to Calibrate & Resync Timestamps"
               >
                 <span className={`w-2 h-2 rounded-full ${isScrolling ? 'bg-emerald-400 animate-pulse' : 'bg-purple-400'}`} />
                 <span>LRC Sync</span>
-              </div>
+                <Sliders className="w-3 h-3 text-purple-400 ml-0.5" />
+              </button>
             )}
             <button
               id="scroll-play-pause-btn"
@@ -2561,10 +2756,12 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         onTimeUpdate={(t, playing) => {
           currentAudioTimeRef.current = t;
           isAudioPlayingRef.current = playing;
-          if (playing && !isScrollingRef.current) {
-            setIsScrolling(true);
+          if (playing && t > 0) {
+            updateRunningTimeDisplay(t);
           }
         }}
+        onOpenResyncModal={() => setShowLrcResyncModal(true)}
+        seekToTime={seekTargetTime}
       />
 
       {/* Interactive TAB Diagram Grid Editor Modal */}
@@ -2577,6 +2774,43 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           initialLines={tabEditorState.tabLines}
           instrument={settings.instrument || 'guitar'}
           measureInsertWidth={settings.measureInsertWidth || 20}
+        />
+      )}
+
+      {/* LRC Timestamp Resync Modal */}
+      {showLrcResyncModal && (
+        <LrcResyncModal
+          isOpen={showLrcResyncModal}
+          onClose={() => setShowLrcResyncModal(false)}
+          song={song}
+          rawChordPro={currentRawChordPro}
+          activeTrack={activeFloatingTrack}
+          getCurrentAudioTime={() => {
+            if (activeFloatingTrack && currentAudioTimeRef.current > 0) {
+              return currentAudioTimeRef.current;
+            }
+            return lrcCurrentSecondsRef.current;
+          }}
+          onApplyOffset={(newRaw) => {
+            setCurrentRawChordPro(newRaw);
+            setHasCustomChordChanges(true);
+          }}
+          onSavePermanent={async (newRaw) => {
+            setCurrentRawChordPro(newRaw);
+            setHasCustomChordChanges(false);
+            if (onSaveSong) {
+              const updatedParsed = parseChordPro(newRaw);
+              updatedParsed.customChords = { ...updatedParsed.customChords, ...songCustomChords };
+              const updatedSong: Song = {
+                ...song,
+                rawChordPro: newRaw,
+                parsed: updatedParsed,
+                updatedAt: Date.now(),
+              };
+              await onSaveSong(updatedSong);
+              return `Updated "${song.title}" in your SongBook library!`;
+            }
+          }}
         />
       )}
     </div>
@@ -2705,6 +2939,8 @@ interface RenderLineProps {
     }
   ) => void;
   onLineClick?: (sourceLineIndex?: number, lineText?: string) => void;
+  onRepositionToLine?: (lineIndex: number, timeSeconds?: number) => void;
+  isFlashed?: boolean;
 }
 
 const RenderLine: React.FC<RenderLineProps> = ({
@@ -2723,6 +2959,8 @@ const RenderLine: React.FC<RenderLineProps> = ({
   onEditTab,
   onChordClick,
   onLineClick,
+  onRepositionToLine,
+  isFlashed,
 }) => {
   if (line.type === 'empty') {
     return <div className="h-4" />;
@@ -2839,17 +3077,33 @@ const RenderLine: React.FC<RenderLineProps> = ({
         <div 
           data-line-index={lineIndex}
           data-time-seconds={line.timeSeconds !== undefined ? line.timeSeconds : ''}
-          className={`my-1.5 leading-relaxed rounded-lg transition-colors ${
+          className={`group/line my-1.5 leading-relaxed rounded-lg transition-all flex items-center ${
+            isFlashed ? 'ring-2 ring-amber-400 bg-amber-500/25 px-1.5' : ''
+          } ${
             isAddChordMode 
               ? 'cursor-pointer p-1 bg-amber-500/10 hover:bg-amber-500/20 ring-1 ring-amber-400/50' 
-              : ''
+              : 'cursor-pointer hover:bg-slate-800/40'
           }`}
           onClick={() => {
             if (isAddChordMode && onLineClick) {
               onLineClick(line.sourceLineIndex, rawLineText);
+            } else if (!isAddChordMode && onRepositionToLine) {
+              onRepositionToLine(lineIndex, line.timeSeconds);
             }
           }}
         >
+          {/* Quick Reposition / Align Trigger Button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRepositionToLine?.(lineIndex, line.timeSeconds);
+            }}
+            className="opacity-20 hover:opacity-100 group-hover/line:opacity-90 p-0.5 mr-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition-all cursor-pointer inline-flex items-center shrink-0"
+            title="Align line to Active Scroll Position"
+          >
+            <Crosshair className="w-3.5 h-3.5" />
+          </button>
           <span className="select-text whitespace-pre">
             {fullLineLyrics || '\u00A0'}
           </span>
@@ -2863,17 +3117,33 @@ const RenderLine: React.FC<RenderLineProps> = ({
       <div 
         data-line-index={lineIndex}
         data-time-seconds={line.timeSeconds !== undefined ? line.timeSeconds : ''}
-        className={`flex flex-wrap items-end my-1.5 leading-snug rounded-lg transition-colors ${
+        className={`group/line flex flex-wrap items-end my-1.5 leading-snug rounded-lg transition-all ${
+          isFlashed ? 'ring-2 ring-amber-400 bg-amber-500/25 px-1.5' : ''
+        } ${
           isAddChordMode 
             ? 'cursor-pointer p-1 bg-amber-500/10 hover:bg-amber-500/20 ring-1 ring-amber-400/50' 
-            : ''
+            : 'cursor-pointer hover:bg-slate-800/30'
         }`}
         onClick={() => {
           if (isAddChordMode && onLineClick) {
             onLineClick(line.sourceLineIndex, rawLineText);
+          } else if (!isAddChordMode && onRepositionToLine) {
+            onRepositionToLine(lineIndex, line.timeSeconds);
           }
         }}
       >
+        {/* Quick Reposition / Align Trigger Button */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRepositionToLine?.(lineIndex, line.timeSeconds);
+          }}
+          className="opacity-20 hover:opacity-100 group-hover/line:opacity-90 p-0.5 mr-1.5 mb-1 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded transition-all cursor-pointer inline-flex items-center shrink-0 self-end"
+          title="Align line to Active Scroll Position"
+        >
+          <Crosshair className="w-3.5 h-3.5" />
+        </button>
         {line.segments.map((seg, segIdx) => {
           const rawChord = seg.chord || '';
           const isChordSeg = Boolean(rawChord);
