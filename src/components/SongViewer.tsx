@@ -188,7 +188,15 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const [isScrolling, setIsScrolling] = useState<boolean>(false);
   const songDefaultSpeed = song.scrollSpeed ?? song.parsed?.scrollSpeed;
   const [scrollSpeed, setScrollSpeed] = useState<number>(songDefaultSpeed || settings.scrollSpeed || 30); // px / sec
-  const [scrollProgress, setScrollProgress] = useState<number>(0);
+  const scrollProgressBarRef = useRef<HTMLDivElement | null>(null);
+
+  const updateScrollProgressBar = useCallback((scrollTop: number, scrollHeight: number, clientHeight: number) => {
+    const maxScroll = scrollHeight - clientHeight;
+    const pct = maxScroll > 0 ? Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100)) : 0;
+    if (scrollProgressBarRef.current) {
+      scrollProgressBarRef.current.style.width = `${pct}%`;
+    }
+  }, []);
 
   // Save prompt state on exit
   const [showSaveExitModal, setShowSaveExitModal] = useState<boolean>(false);
@@ -235,6 +243,14 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const isScrollingRef = useRef<boolean>(isScrolling);
   isScrollingRef.current = isScrolling;
 
+  // Cached scroll geometry (computed outside 60fps loop to prevent layout thrashing & video lag)
+  const cachedLrcItemsRef = useRef<{ time: number; top: number }[]>([]);
+  const cachedPauseItemsRef = useRef<{ id: string; pauseSec: number; top: number }[]>([]);
+  const cachedClientHeightRef = useRef<number>(0);
+  const cachedScrollHeightRef = useRef<number>(0);
+  const cachedMaxScrollRef = useRef<number>(0);
+  const lastLrcIdxRef = useRef<number>(0);
+
   // Active Scroll Line Position Ratio: 'middle' = 50%, 'upper' = 33.3% (2/3 up from bottom)
   const activeLineRatio = (settings.activeScrollPosition || 'upper') === 'middle' ? 0.50 : 0.333;
 
@@ -251,15 +267,22 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   const effectiveScrollSpeedRef = useRef<number>(effectiveScrollSpeed);
   effectiveScrollSpeedRef.current = effectiveScrollSpeed;
 
-  // LRC Timestamps audio synchronization & running time display refs
+  // LRC Timestamps & Hardware-Accurate Auto-Scroll Running Clock Refs
   const currentAudioTimeRef = useRef<number>(0);
   const isAudioPlayingRef = useRef<boolean>(false);
-  const lrcStartTimeRef = useRef<number | null>(null);
-  const lrcStartOffsetSecRef = useRef<number>(0);
   const lrcCurrentSecondsRef = useRef<number>(0);
+  const clockAnchorWallMsRef = useRef<number | null>(null);
+  const clockAnchorSongSecRef = useRef<number>(0);
   const outroVelocityRef = useRef<number>(0);
   const runningTimeElRef = useRef<HTMLSpanElement | null>(null);
   const lastDisplayedSecRef = useRef<number>(-1);
+
+  const getLiveClockSeconds = useCallback(() => {
+    if (isScrollingRef.current && !isScrollPausedRef.current && clockAnchorWallMsRef.current !== null) {
+      return clockAnchorSongSecRef.current + (performance.now() - clockAnchorWallMsRef.current) / 1000;
+    }
+    return lrcCurrentSecondsRef.current;
+  }, []);
 
   const updateRunningTimeDisplay = useCallback((seconds: number) => {
     const wholeSec = Math.max(0, Math.floor(isNaN(seconds) ? 0 : seconds));
@@ -317,30 +340,89 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     };
   }, []);
 
-  // Update scroll progress on manual scroll & sync exact scroll position
-  const handleScrollUpdate = useCallback(() => {
-    if (!containerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-    if (!isScrollingRef.current) {
-      exactScrollTopRef.current = scrollTop;
-    }
-    const maxScroll = scrollHeight - clientHeight;
-    if (maxScroll > 0) {
-      setScrollProgress(Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100)));
-    }
+  // Rebuild cached DOM line coordinates outside the 60fps scroll loop
+  const rebuildScrollGeometryCache = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-    // Re-arm any ScrollPause elements that have moved back below the trigger line
-    const pauseElements = containerRef.current.querySelectorAll('[data-scroll-pause]');
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const triggerLine = containerRect.top + containerRect.height * activeLineRatio;
-    pauseElements.forEach((el) => {
-      const elRect = el.getBoundingClientRect();
-      const pauseId = el.getAttribute('data-pause-id') || 'pause-default';
-      if (elRect.top > triggerLine) {
-        triggeredPausesRef.current.delete(pauseId);
+    const containerRect = container.getBoundingClientRect();
+    const cScrollTop = container.scrollTop;
+    const clientHeight = container.clientHeight;
+    const scrollHeight = container.scrollHeight;
+
+    cachedClientHeightRef.current = clientHeight;
+    cachedScrollHeightRef.current = scrollHeight;
+    cachedMaxScrollRef.current = Math.max(0, scrollHeight - clientHeight);
+
+    const timestampNodes = container.querySelectorAll<HTMLElement>(
+      '[data-time-seconds]:not([data-time-seconds=""])'
+    );
+    const lrcItems: { time: number; top: number }[] = [];
+    timestampNodes.forEach((node) => {
+      const sec = parseFloat(node.getAttribute('data-time-seconds') || '');
+      if (!isNaN(sec) && sec >= 0) {
+        const nodeTop = node.getBoundingClientRect().top - containerRect.top + cScrollTop;
+        lrcItems.push({ time: sec, top: nodeTop });
       }
     });
+    lrcItems.sort((a, b) => a.top - b.top);
+    let prevTime = 0;
+    for (let i = 0; i < lrcItems.length; i++) {
+      if (lrcItems[i].time < prevTime) {
+        lrcItems[i].time = prevTime;
+      } else {
+        prevTime = lrcItems[i].time;
+      }
+    }
+    cachedLrcItemsRef.current = lrcItems;
+    lastLrcIdxRef.current = 0;
+
+    const pauseNodes = container.querySelectorAll<HTMLElement>('[data-scroll-pause]');
+    const pauseItems: { id: string; pauseSec: number; top: number }[] = [];
+    pauseNodes.forEach((node) => {
+      const id = node.getAttribute('data-pause-id') || 'pause-default';
+      const pauseSec = parseInt(node.getAttribute('data-scroll-pause') || '8', 10);
+      const nodeTop = node.getBoundingClientRect().top - containerRect.top + cScrollTop;
+      pauseItems.push({ id, pauseSec, top: nodeTop });
+    });
+    cachedPauseItemsRef.current = pauseItems;
   }, []);
+
+  useEffect(() => {
+    const rafId = requestAnimationFrame(() => rebuildScrollGeometryCache());
+    const onResize = () => rebuildScrollGeometryCache();
+    window.addEventListener('resize', onResize);
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [
+    rebuildScrollGeometryCache,
+    displayLines,
+    fontSize,
+    columnCount,
+    showChordDiagrams,
+    showTabDiagrams,
+    showChordNames,
+    showSummaryOnly,
+    songCustomChords,
+  ]);
+
+  // Update scroll progress on manual scroll & sync exact scroll position (skipped during active auto-scroll)
+  const handleScrollUpdate = useCallback(() => {
+    if (isScrollingRef.current || !containerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
+    exactScrollTopRef.current = scrollTop;
+    updateScrollProgressBar(scrollTop, scrollHeight, clientHeight);
+
+    const triggerDocY = scrollTop + clientHeight * activeLineRatio;
+    const pauses = cachedPauseItemsRef.current;
+    for (let i = 0; i < pauses.length; i++) {
+      if (pauses[i].top > triggerDocY) {
+        triggeredPausesRef.current.delete(pauses[i].id);
+      }
+    }
+  }, [activeLineRatio, updateScrollProgressBar]);
 
   // Update scroll speed whenever active song changes and has a defined scrollSpeed
   useEffect(() => {
@@ -351,13 +433,26 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     }
     setHasManuallyChangedSpeed(false);
     triggeredPausesRef.current.clear();
-  }, [song.id, song.scrollSpeed, song.parsed?.scrollSpeed]);
+    lrcCurrentSecondsRef.current = 0;
+    clockAnchorSongSecRef.current = 0;
+    clockAnchorWallMsRef.current = null;
+    lastDisplayedSecRef.current = -1;
+    updateRunningTimeDisplay(0);
+  }, [song.id, song.scrollSpeed, song.parsed?.scrollSpeed, updateRunningTimeDisplay]);
 
   // Trigger ScrollPause directive timer
   const triggerScrollPause = useCallback((seconds: number) => {
     if (pauseIntervalRef.current) {
       clearInterval(pauseIntervalRef.current);
       pauseIntervalRef.current = null;
+    }
+
+    // Freeze wall-clock anchor during ScrollPause directive
+    if (clockAnchorWallMsRef.current !== null) {
+      lrcCurrentSecondsRef.current =
+        clockAnchorSongSecRef.current + (performance.now() - clockAnchorWallMsRef.current) / 1000;
+      clockAnchorSongSecRef.current = lrcCurrentSecondsRef.current;
+      clockAnchorWallMsRef.current = null;
     }
 
     setIsScrollPausedByDirective(true);
@@ -373,6 +468,9 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         setIsScrollPausedByDirective(false);
         isScrollPausedRef.current = false;
         setPauseCountdown(null);
+        // Re-anchor wall clock upon automatic resume
+        clockAnchorSongSecRef.current = lrcCurrentSecondsRef.current;
+        clockAnchorWallMsRef.current = isScrollingRef.current ? performance.now() : null;
       } else {
         setPauseCountdown(remaining);
       }
@@ -380,7 +478,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   }, []);
 
   // Skip pause manually
-  const handleSkipPause = () => {
+  const handleSkipPause = useCallback(() => {
     if (pauseIntervalRef.current) {
       clearInterval(pauseIntervalRef.current);
       pauseIntervalRef.current = null;
@@ -388,7 +486,11 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     setIsScrollPausedByDirective(false);
     isScrollPausedRef.current = false;
     setPauseCountdown(null);
-  };
+    if (isScrollingRef.current) {
+      clockAnchorSongSecRef.current = lrcCurrentSecondsRef.current;
+      clockAnchorWallMsRef.current = performance.now();
+    }
+  }, []);
 
   // Cleanup pause interval on unmount
   useEffect(() => {
@@ -399,7 +501,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     };
   }, []);
 
-  // Auto-scroll loop using high-precision requestAnimationFrame with sub-pixel accumulator & LRC sync
+  // Auto-scroll loop: zero React re-renders, zero DOM queries, hardware-accurate wall-clock anchor
   useEffect(() => {
     if (!isScrolling) {
       if (animationFrameRef.current) {
@@ -407,15 +509,24 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         animationFrameRef.current = null;
       }
       lastTimestampRef.current = null;
+      // Pause running clock immediately at exact elapsed position
+      if (clockAnchorWallMsRef.current !== null && !isScrollPausedRef.current) {
+        lrcCurrentSecondsRef.current =
+          clockAnchorSongSecRef.current + (performance.now() - clockAnchorWallMsRef.current) / 1000;
+        clockAnchorSongSecRef.current = lrcCurrentSecondsRef.current;
+        updateRunningTimeDisplay(lrcCurrentSecondsRef.current);
+      }
+      clockAnchorWallMsRef.current = null;
       return;
     }
 
-    // Initialize exact scroll top reference when starting scroll
+    // Build layout geometry cache once on scroll start & anchor wall-clock
+    rebuildScrollGeometryCache();
     if (containerRef.current) {
       exactScrollTopRef.current = containerRef.current.scrollTop;
     }
-
-    let lastClockTime = performance.now();
+    clockAnchorSongSecRef.current = lrcCurrentSecondsRef.current;
+    clockAnchorWallMsRef.current = isScrollPausedRef.current ? null : performance.now();
 
     const scrollStep = (timestamp: number) => {
       if (!lastTimestampRef.current) {
@@ -424,155 +535,106 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       const deltaSeconds = Math.min((timestamp - lastTimestampRef.current) / 1000, 0.1);
       lastTimestampRef.current = timestamp;
 
-      const now = performance.now();
-      const frameElapsed = Math.min((now - lastClockTime) / 1000, 0.1);
-      lastClockTime = now;
-
-      if (containerRef.current && isScrollingRef.current) {
-        // If currently paused by ScrollPause directive, wait without moving scrollTop
+      const container = containerRef.current;
+      if (container && isScrollingRef.current) {
         if (!isScrollPausedRef.current) {
-          // Advance unified running playback clock (uses audio time if active track playing, else local timer)
-          let currentSeconds = 0;
-          if (isAudioPlayingRef.current && currentAudioTimeRef.current > 0) {
-            lrcCurrentSecondsRef.current = currentAudioTimeRef.current;
-            currentSeconds = currentAudioTimeRef.current;
-          } else {
-            lrcCurrentSecondsRef.current += frameElapsed;
-            currentSeconds = lrcCurrentSecondsRef.current;
+          const now = performance.now();
+          if (clockAnchorWallMsRef.current === null) {
+            clockAnchorSongSecRef.current = lrcCurrentSecondsRef.current;
+            clockAnchorWallMsRef.current = now;
           }
+          // Exact wall-clock elapsed time (zero drift, 1.000s = 1.000s regardless of frame rate)
+          const currentSeconds = clockAnchorSongSecRef.current + (now - clockAnchorWallMsRef.current) / 1000;
+          lrcCurrentSecondsRef.current = currentSeconds;
           updateRunningTimeDisplay(currentSeconds);
 
-          if (hasLrcTimestamps) {
-            const timestampNodes = containerRef.current.querySelectorAll<HTMLElement>(
-              '[data-time-seconds]:not([data-time-seconds=""])'
-            );
+          const clientHeight = cachedClientHeightRef.current || container.clientHeight;
+          const scrollHeight = cachedScrollHeightRef.current || container.scrollHeight;
+          const maxScroll = Math.max(0, scrollHeight - clientHeight);
+          const focalOffset = clientHeight * activeLineRatio;
+          const items = cachedLrcItemsRef.current;
 
-            if (timestampNodes.length > 0) {
-              const items: { time: number; top: number; node: HTMLElement }[] = [];
-              const containerRect = containerRef.current.getBoundingClientRect();
-              const cScrollTop = containerRef.current.scrollTop;
-
-              timestampNodes.forEach((node) => {
-                const sec = parseFloat(node.getAttribute('data-time-seconds') || '0');
-                const nodeRect = node.getBoundingClientRect();
-                const nodeTop = nodeRect.top - containerRect.top + cScrollTop;
-                if (!isNaN(sec) && sec >= 0) {
-                  items.push({ time: sec, top: nodeTop, node });
-                }
-              });
-
-              if (items.length > 0) {
-                // Sort strictly by document position order (DOM top)
-                items.sort((a, b) => a.top - b.top);
-
-                // Guarantee monotonic timestamps so an out-of-order or clamped tag never snaps k back to 0
-                let prevTime = 0;
-                for (let i = 0; i < items.length; i++) {
-                  if (items[i].time < prevTime) {
-                    items[i].time = prevTime;
-                  } else {
-                    prevTime = items[i].time;
-                  }
-                }
-
-                const containerHeight = containerRef.current.clientHeight;
-                const focalOffset = containerHeight * activeLineRatio;
-                const maxScroll = Math.max(0, containerRef.current.scrollHeight - containerHeight);
-
-                if (currentSeconds >= items[items.length - 1].time) {
-                  // Reached/passed last LRC timestamp: continue scrolling smoothly at the same pace
-                  // until reaching the very end of the file (maxScroll), then stop without resetting!
-                  const pace =
-                    outroVelocityRef.current > 0
-                      ? outroVelocityRef.current
-                      : effectiveScrollSpeedRef.current || 22;
-                  exactScrollTopRef.current = Math.min(maxScroll, exactScrollTopRef.current + pace * deltaSeconds);
-                  containerRef.current.scrollTop = exactScrollTopRef.current;
-                } else {
-                  let targetTop = 0;
-                  if (currentSeconds <= items[0].time) {
-                    // Intro lead-in before first timestamp
-                    const ratio = Math.max(0, currentSeconds / Math.max(items[0].time, 0.1));
-                    const firstTarget = Math.max(0, items[0].top - focalOffset);
-                    targetTop = ratio * firstTarget;
-                  } else {
-                    let k = 0;
-                    for (let i = 0; i < items.length - 1; i++) {
-                      if (currentSeconds >= items[i].time && currentSeconds <= items[i + 1].time) {
-                        k = i;
-                        break;
-                      }
-                    }
-                    const itemA = items[k];
-                    const itemB = items[k + 1];
-                    const dt = Math.max(0.05, itemB.time - itemA.time);
-                    const ratio = Math.max(0, Math.min(1, (currentSeconds - itemA.time) / dt));
-                    const topA = Math.max(0, itemA.top - focalOffset);
-                    const topB = Math.max(0, itemB.top - focalOffset);
-                    targetTop = topA + ratio * Math.max(0, topB - topA);
-
-                    // Record natural pixel/sec pace so outro after the last timestamp continues seamlessly
-                    if (itemB.time > itemA.time + 0.3 && itemB.top > itemA.top) {
-                      const instantPace = (itemB.top - itemA.top) / dt;
-                      const clampedPace = Math.max(10, Math.min(90, instantPace));
-                      outroVelocityRef.current =
-                        outroVelocityRef.current > 0
-                          ? outroVelocityRef.current * 0.85 + clampedPace * 0.15
-                          : clampedPace;
-                    }
-                  }
-
-                  targetTop = Math.max(0, Math.min(maxScroll, targetTop));
-                  const lerpFactor = Math.min(1, deltaSeconds * 12);
-                  exactScrollTopRef.current += (targetTop - exactScrollTopRef.current) * lerpFactor;
-                  containerRef.current.scrollTop = exactScrollTopRef.current;
-                }
-              } else {
-                const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
-                exactScrollTopRef.current += scrollAmount;
-                containerRef.current.scrollTop = exactScrollTopRef.current;
-              }
+          if (hasLrcTimestamps && items.length > 0) {
+            if (currentSeconds >= items[items.length - 1].time) {
+              // Passed last LRC timestamp: continue smoothly at natural pace until end of file
+              const pace =
+                outroVelocityRef.current > 0
+                  ? outroVelocityRef.current
+                  : effectiveScrollSpeedRef.current || 22;
+              exactScrollTopRef.current = Math.min(maxScroll, exactScrollTopRef.current + pace * deltaSeconds);
+              container.scrollTop = exactScrollTopRef.current;
             } else {
-              // Fallback to speed if no timestamp elements rendered
-              const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
-              exactScrollTopRef.current += scrollAmount;
-              containerRef.current.scrollTop = exactScrollTopRef.current;
+              let targetTop = 0;
+              if (currentSeconds <= items[0].time) {
+                const ratio = Math.max(0, currentSeconds / Math.max(items[0].time, 0.1));
+                const firstTarget = Math.max(0, items[0].top - focalOffset);
+                targetTop = ratio * firstTarget;
+                lastLrcIdxRef.current = 0;
+              } else {
+                let k = lastLrcIdxRef.current;
+                if (k >= items.length - 1 || currentSeconds < items[k].time) {
+                  k = 0;
+                }
+                while (k < items.length - 2 && currentSeconds > items[k + 1].time) {
+                  k++;
+                }
+                lastLrcIdxRef.current = k;
+
+                const itemA = items[k];
+                const itemB = items[k + 1];
+                const dt = Math.max(0.05, itemB.time - itemA.time);
+                const ratio = Math.max(0, Math.min(1, (currentSeconds - itemA.time) / dt));
+                const topA = Math.max(0, itemA.top - focalOffset);
+                const topB = Math.max(0, itemB.top - focalOffset);
+                targetTop = topA + ratio * Math.max(0, topB - topA);
+
+                if (itemB.time > itemA.time + 0.3 && itemB.top > itemA.top) {
+                  const instantPace = (itemB.top - itemA.top) / dt;
+                  const clampedPace = Math.max(10, Math.min(90, instantPace));
+                  outroVelocityRef.current =
+                    outroVelocityRef.current > 0
+                      ? outroVelocityRef.current * 0.85 + clampedPace * 0.15
+                      : clampedPace;
+                }
+              }
+
+              targetTop = Math.max(0, Math.min(maxScroll, targetTop));
+              const lerpFactor = Math.min(1, deltaSeconds * 12);
+              exactScrollTopRef.current += (targetTop - exactScrollTopRef.current) * lerpFactor;
+              container.scrollTop = exactScrollTopRef.current;
             }
           } else {
-            // Standard fixed speed auto-scroll
-            const scrollAmount = effectiveScrollSpeedRef.current * deltaSeconds;
-            exactScrollTopRef.current += scrollAmount;
-            containerRef.current.scrollTop = exactScrollTopRef.current;
+            // Standard fixed-speed auto-scroll
+            exactScrollTopRef.current = Math.min(
+              maxScroll,
+              exactScrollTopRef.current + effectiveScrollSpeedRef.current * deltaSeconds
+            );
+            container.scrollTop = exactScrollTopRef.current;
           }
 
-          const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-          const maxScroll = scrollHeight - clientHeight;
-          if (maxScroll > 0) {
-            setScrollProgress(Math.min(100, Math.max(0, (scrollTop / maxScroll) * 100)));
-          }
+          // Direct DOM progress bar update (0 React re-renders!)
+          updateScrollProgressBar(exactScrollTopRef.current, scrollHeight, clientHeight);
 
-          // Check if any ScrollPause element reached the Active Line Trigger
-          const pauseElements = containerRef.current.querySelectorAll('[data-scroll-pause]');
-          const containerRect = containerRef.current.getBoundingClientRect();
-          const triggerLine = containerRect.top + containerRect.height * activeLineRatio;
-
-          pauseElements.forEach((el) => {
-            const pauseId = el.getAttribute('data-pause-id') || 'pause-default';
-            const elRect = el.getBoundingClientRect();
-            // If the element has moved back below the trigger line (e.g., scrolled up), re-arm it
-            if (elRect.top > triggerLine) {
-              triggeredPausesRef.current.delete(pauseId);
-            } else if (!triggeredPausesRef.current.has(pauseId)) {
-              if (elRect.top <= triggerLine && elRect.top >= containerRect.top) {
-                triggeredPausesRef.current.add(pauseId);
-                const pauseSeconds = parseInt(el.getAttribute('data-scroll-pause') || '8', 10);
-                triggerScrollPause(pauseSeconds);
+          // Pure numeric ScrollPause check against cached pause offsets (0 DOM queries!)
+          const pauses = cachedPauseItemsRef.current;
+          if (pauses.length > 0) {
+            const triggerDocY = exactScrollTopRef.current + focalOffset;
+            for (let i = 0; i < pauses.length; i++) {
+              const p = pauses[i];
+              if (p.top > triggerDocY) {
+                triggeredPausesRef.current.delete(p.id);
+              } else if (!triggeredPausesRef.current.has(p.id)) {
+                if (p.top >= exactScrollTopRef.current && p.top <= triggerDocY) {
+                  triggeredPausesRef.current.add(p.id);
+                  triggerScrollPause(p.pauseSec);
+                  break;
+                }
               }
             }
-          });
+          }
 
-          if (scrollTop + clientHeight >= scrollHeight - 2) {
-            // Reached end of song: stop scrolling cleanly with ending kept in view (do NOT reset to top)
+          if (maxScroll > 0 && exactScrollTopRef.current >= maxScroll - 2) {
+            // Reached end of song: stop cleanly without resetting to top
             setIsScrolling(false);
             return;
           }
@@ -591,19 +653,28 @@ export const SongViewer: React.FC<SongViewerProps> = ({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isScrolling, triggerScrollPause, hasLrcTimestamps, activeLineRatio, updateRunningTimeDisplay]);
+  }, [
+    isScrolling,
+    triggerScrollPause,
+    hasLrcTimestamps,
+    activeLineRatio,
+    updateRunningTimeDisplay,
+    updateScrollProgressBar,
+    rebuildScrollGeometryCache,
+  ]);
 
   // Restart scroll from top
   const handleRestart = () => {
     if (containerRef.current) {
       containerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
       exactScrollTopRef.current = 0;
-      setScrollProgress(0);
+      updateScrollProgressBar(0, cachedScrollHeightRef.current || 1, cachedClientHeightRef.current || 1);
       triggeredPausesRef.current.clear();
       lrcCurrentSecondsRef.current = 0;
+      clockAnchorSongSecRef.current = 0;
+      clockAnchorWallMsRef.current = isScrollingRef.current ? performance.now() : null;
+      lastLrcIdxRef.current = 0;
       currentAudioTimeRef.current = 0;
-      lrcStartTimeRef.current = null;
-      lrcStartOffsetSecRef.current = 0;
       outroVelocityRef.current = 0;
       lastDisplayedSecRef.current = -1;
       updateRunningTimeDisplay(0);
@@ -613,36 +684,68 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     }
   };
 
-  // Reposition scroll so line aligns with Active Scroll Line Indicator
+  // Reposition scroll so clicked line aligns with Active Scroll Line Indicator AND recalibrates running clock
   const handleRepositionToLine = useCallback((lineIndex: number, timeSeconds?: number) => {
-    if (!containerRef.current) return;
-    const lineEl = containerRef.current.querySelector<HTMLElement>(`[data-line-index="${lineIndex}"]`);
+    const container = containerRef.current;
+    if (!container) return;
+    const lineEl = container.querySelector<HTMLElement>(`[data-line-index="${lineIndex}"]`);
     if (!lineEl) return;
 
-    const containerRect = containerRef.current.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
     const lineRect = lineEl.getBoundingClientRect();
-    const cScrollTop = containerRef.current.scrollTop;
+    const cScrollTop = container.scrollTop;
     const lineTop = lineRect.top - containerRect.top + cScrollTop;
 
-    const focalOffset = containerRef.current.clientHeight * activeLineRatio;
-    const targetScrollTop = Math.max(0, lineTop - focalOffset);
+    const clientHeight = container.clientHeight;
+    const scrollHeight = container.scrollHeight;
+    const maxScroll = Math.max(0, scrollHeight - clientHeight);
+    const focalOffset = clientHeight * activeLineRatio;
+    const targetScrollTop = Math.max(0, Math.min(maxScroll, lineTop - focalOffset));
 
-    containerRef.current.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+    if (isScrollingRef.current) {
+      // Snap immediately while actively scrolling so smooth-scroll never fights scrollStep
+      container.scrollTop = targetScrollTop;
+    } else {
+      container.scrollTo({ top: targetScrollTop, behavior: 'smooth' });
+    }
     exactScrollTopRef.current = targetScrollTop;
+    updateScrollProgressBar(targetScrollTop, scrollHeight, clientHeight);
 
-    if (timeSeconds !== undefined && timeSeconds >= 0) {
-      lrcCurrentSecondsRef.current = timeSeconds;
-      currentAudioTimeRef.current = timeSeconds;
-      lastDisplayedSecRef.current = -1;
-      updateRunningTimeDisplay(timeSeconds);
-      if (activeFloatingTrack) {
-        setSeekTargetTime(timeSeconds);
+    // Determine recalibrated LRC time (exact timestamp if present, or interpolated from surrounding LRC lines)
+    let recalibratedSec: number | undefined =
+      timeSeconds !== undefined && timeSeconds >= 0 ? timeSeconds : undefined;
+
+    if (recalibratedSec === undefined && hasLrcTimestamps && cachedLrcItemsRef.current.length > 0) {
+      const items = cachedLrcItemsRef.current;
+      if (lineTop <= items[0].top) {
+        recalibratedSec = items[0].time;
+      } else if (lineTop >= items[items.length - 1].top) {
+        recalibratedSec = items[items.length - 1].time;
+      } else {
+        for (let i = 0; i < items.length - 1; i++) {
+          if (lineTop >= items[i].top && lineTop <= items[i + 1].top) {
+            const span = Math.max(1, items[i + 1].top - items[i].top);
+            const frac = (lineTop - items[i].top) / span;
+            recalibratedSec = items[i].time + frac * Math.max(0, items[i + 1].time - items[i].time);
+            break;
+          }
+        }
       }
     }
 
+    if (recalibratedSec !== undefined && recalibratedSec >= 0) {
+      lrcCurrentSecondsRef.current = recalibratedSec;
+      clockAnchorSongSecRef.current = recalibratedSec;
+      clockAnchorWallMsRef.current =
+        isScrollingRef.current && !isScrollPausedRef.current ? performance.now() : null;
+      lastLrcIdxRef.current = 0;
+      lastDisplayedSecRef.current = -1;
+      updateRunningTimeDisplay(recalibratedSec);
+    }
+
     setFlashedLineIndex(lineIndex);
-    setTimeout(() => setFlashedLineIndex(null), 1200);
-  }, [activeLineRatio, activeFloatingTrack, updateRunningTimeDisplay]);
+    setTimeout(() => setFlashedLineIndex(null), 900);
+  }, [activeLineRatio, hasLrcTimestamps, updateRunningTimeDisplay, updateScrollProgressBar]);
 
   const handlePageUp = () => {
     if (containerRef.current) {
@@ -1294,13 +1397,39 @@ export const SongViewer: React.FC<SongViewerProps> = ({
     }
   };
 
-  const handleOpenBackTrackInBrowser = (track: BackTrackItem) => {
+  const handleOpenBackTrackInBrowser = useCallback((track: BackTrackItem) => {
     let targetUrl = track.url;
     if (track.type === 'local' && !targetUrl.startsWith('file:///')) {
       targetUrl = `file:///${targetUrl.replace(/\\/g, '/')}`;
     }
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
-  };
+  }, []);
+
+  const handleCloseFloatingPlayer = useCallback(() => {
+    setActiveFloatingTrack(null);
+    isAudioPlayingRef.current = false;
+  }, []);
+
+  const handlePlayerTimeUpdate = useCallback((t: number, playing: boolean) => {
+    // Only record HTML5 audio player state; never start or drive the Auto-Scroll running clock
+    currentAudioTimeRef.current = t;
+    isAudioPlayingRef.current = playing;
+  }, []);
+
+  const handleOpenResyncModal = useCallback(() => {
+    setShowLrcResyncModal(true);
+  }, []);
+
+  const getCurrentAudioTimeForResync = useCallback(() => {
+    if (
+      activeFloatingTrack &&
+      (activeFloatingTrack.type === 'github' || activeFloatingTrack.type === 'audio-url') &&
+      currentAudioTimeRef.current > 0
+    ) {
+      return currentAudioTimeRef.current;
+    }
+    return getLiveClockSeconds();
+  }, [activeFloatingTrack, getLiveClockSeconds]);
 
   const handleTransposeStep = (direction: 1 | -1) => {
     setTransposeOffset((prev) => {
@@ -1430,7 +1559,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       {/* Top Header Bar */}
       <header
         id="viewer-top-bar"
-        className={`sticky top-0 z-40 px-2.5 sm:px-6 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 border-b backdrop-blur-md ${themeStyles.headerBg} shadow-sm`}
+        className={`sticky top-0 z-40 px-2.5 sm:px-6 py-2 sm:py-2.5 flex flex-wrap items-center justify-between gap-2 border-b ${themeStyles.headerBg} shadow-sm`}
       >
         {/* Left: Back & Song Info */}
         <div className="flex items-center gap-2 sm:gap-4 min-w-0">
@@ -1638,9 +1767,10 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       {/* Scroll Progress Bar */}
       <div className="w-full h-1 bg-slate-800/50 relative overflow-hidden shrink-0">
         <div
+          ref={scrollProgressBarRef}
           id="scroll-progress-indicator"
-          className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-75"
-          style={{ width: `${scrollProgress}%` }}
+          className="h-full bg-gradient-to-r from-amber-500 to-amber-300"
+          style={{ width: '0%' }}
         />
       </div>
 
@@ -2412,7 +2542,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       {/* Bottom Floating Auto-Scroll Control Bar */}
       <footer
         id="auto-scroll-control-bar"
-        className={`sticky bottom-0 z-40 px-3 sm:px-6 py-2.5 sm:py-3 border-t backdrop-blur-md ${themeStyles.barBg} shadow-2xl`}
+        className={`sticky bottom-0 z-40 px-3 sm:px-6 py-2.5 sm:py-3 border-t ${themeStyles.barBg} shadow-2xl`}
       >
         <div className="max-w-4xl mx-auto flex flex-wrap items-center justify-between gap-3">
           {/* Reposition, 3-Mode Toggle & Restart Buttons */}
@@ -2748,19 +2878,10 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       {/* BackTrack Floating Player (YouTube PiP & Background Audio) */}
       <BackTrackFloatingPlayer
         track={activeFloatingTrack}
-        onClose={() => {
-          setActiveFloatingTrack(null);
-          isAudioPlayingRef.current = false;
-        }}
+        onClose={handleCloseFloatingPlayer}
         onOpenInBrowser={handleOpenBackTrackInBrowser}
-        onTimeUpdate={(t, playing) => {
-          currentAudioTimeRef.current = t;
-          isAudioPlayingRef.current = playing;
-          if (playing && t > 0) {
-            updateRunningTimeDisplay(t);
-          }
-        }}
-        onOpenResyncModal={() => setShowLrcResyncModal(true)}
+        onTimeUpdate={handlePlayerTimeUpdate}
+        onOpenResyncModal={handleOpenResyncModal}
         seekToTime={seekTargetTime}
       />
 
@@ -2785,12 +2906,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           song={song}
           rawChordPro={currentRawChordPro}
           activeTrack={activeFloatingTrack}
-          getCurrentAudioTime={() => {
-            if (activeFloatingTrack && currentAudioTimeRef.current > 0) {
-              return currentAudioTimeRef.current;
-            }
-            return lrcCurrentSecondsRef.current;
-          }}
+          getCurrentAudioTime={getCurrentAudioTimeForResync}
           onApplyOffset={(newRaw) => {
             setCurrentRawChordPro(newRaw);
             setHasCustomChordChanges(true);
@@ -2943,7 +3059,7 @@ interface RenderLineProps {
   isFlashed?: boolean;
 }
 
-const RenderLine: React.FC<RenderLineProps> = ({
+const RenderLine: React.FC<RenderLineProps> = React.memo(({
   lineIndex,
   line,
   transposeOffset,
@@ -3230,7 +3346,7 @@ const RenderLine: React.FC<RenderLineProps> = ({
       {line.raw || ''}
     </div>
   );
-};
+});
 
 // Guitar Chord Diagram & Builder modal
 const ChordDiagramModal: React.FC<{ 

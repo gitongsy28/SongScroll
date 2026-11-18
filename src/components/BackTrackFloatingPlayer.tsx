@@ -26,7 +26,7 @@ interface BackTrackFloatingPlayerProps {
   seekToTime?: number | null;
 }
 
-export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = ({
+export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = React.memo(({
   track,
   onClose,
   onOpenInBrowser,
@@ -41,7 +41,7 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  // External seek handler
+  // External seek handler (applies to HTML5 <audio> tracks)
   useEffect(() => {
     if (seekToTime !== undefined && seekToTime !== null && !isNaN(seekToTime)) {
       setCurrentTime(seekToTime);
@@ -52,37 +52,18 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
     }
   }, [seekToTime]);
 
-  // Reset states when track changes
+  // Reset states when track changes (does NOT auto-start scrolling running clock)
   useEffect(() => {
     setIsPlaying(true);
     setCurrentTime(0);
     setDuration(0);
-    onTimeUpdate?.(0, true);
+    onTimeUpdate?.(0, false);
   }, [track?.id, track?.url]);
 
   const isYouTube = track?.type === 'youtube';
   const ytVideoId = isYouTube ? extractYouTubeId(track?.url || '') : null;
   const isAudio = track?.type === 'github' || track?.type === 'audio-url';
   const streamableAudioUrl = isAudio ? getStreamableAudioUrl(track?.url || '') : '';
-
-  // Synchronize playback time ticker for YouTube video and pass to onTimeUpdate
-  useEffect(() => {
-    if (!isPlaying) {
-      onTimeUpdate?.(currentTime, false);
-      return;
-    }
-
-    if (isYouTube) {
-      const interval = setInterval(() => {
-        setCurrentTime((prev) => {
-          const next = prev + 0.25;
-          onTimeUpdate?.(next, true);
-          return next;
-        });
-      }, 250);
-      return () => clearInterval(interval);
-    }
-  }, [isPlaying, isYouTube, onTimeUpdate]);
 
   if (!track) return null;
 
@@ -121,12 +102,12 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
   return (
     <div
       id="backtrack-floating-player"
-      className="fixed z-40 bottom-16 sm:bottom-14 right-2 sm:right-5 transition-all duration-200"
+      className="fixed z-40 bottom-24 sm:bottom-24 right-3 sm:right-5"
     >
       {/* Minimized Pill */}
       {isMinimized ? (
-        <div className="flex items-center gap-2 bg-slate-900/95 border border-purple-500/50 backdrop-blur-md rounded-full shadow-2xl px-3 py-1.5 text-xs text-slate-200 animate-in fade-in">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="flex items-center gap-2 bg-slate-900 border border-purple-500/50 rounded-full shadow-2xl px-3 py-1.5 text-xs text-slate-200">
+          <div className="w-2 h-2 rounded-full bg-emerald-400" />
           <span className="font-semibold text-purple-300 truncate max-w-[180px] sm:max-w-[240px]">
             {track.description}
           </span>
@@ -172,9 +153,9 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
         </div>
       ) : (
         /* Expanded Floating Card */
-        <div className="w-[300px] sm:w-[360px] bg-slate-900/95 border border-purple-500/50 backdrop-blur-md rounded-2xl shadow-2xl overflow-hidden text-slate-100 animate-in zoom-in-95 duration-150">
+        <div className="w-[300px] sm:w-[360px] bg-slate-900 border border-purple-500/50 rounded-2xl shadow-2xl overflow-hidden text-slate-100">
           {/* Header */}
-          <div className="px-3.5 py-2 border-b border-slate-800/80 bg-slate-950/70 flex items-center justify-between gap-2">
+          <div className="px-3.5 py-2 border-b border-slate-800 bg-slate-950 flex items-center justify-between gap-2">
             <div className="flex items-center gap-2 min-w-0">
               {isYouTube ? (
                 <Video className="w-4 h-4 text-red-400 shrink-0" />
@@ -345,4 +326,4 @@ export const BackTrackFloatingPlayer: React.FC<BackTrackFloatingPlayerProps> = (
       )}
     </div>
   );
-};
+});
