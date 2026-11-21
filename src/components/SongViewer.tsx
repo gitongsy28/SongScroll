@@ -229,6 +229,8 @@ export const SongViewer: React.FC<SongViewerProps> = ({
   });
   const [activeFloatingTrack, setActiveFloatingTrack] = useState<BackTrackItem | null>(null);
   const [showLrcResyncModal, setShowLrcResyncModal] = useState<boolean>(false);
+  const showLrcResyncModalRef = useRef<boolean>(false);
+  showLrcResyncModalRef.current = showLrcResyncModal;
   const [flashedLineIndex, setFlashedLineIndex] = useState<number | null>(null);
   const [seekTargetTime, setSeekTargetTime] = useState<number | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<boolean>(false);
@@ -432,13 +434,17 @@ export const SongViewer: React.FC<SongViewerProps> = ({
       onUpdateSettings({ scrollSpeed: speed });
     }
     setHasManuallyChangedSpeed(false);
+  }, [song.id, song.scrollSpeed, song.parsed?.scrollSpeed]);
+
+  // Reset running clock ONLY when switching to a different song (song.id)
+  useEffect(() => {
     triggeredPausesRef.current.clear();
     lrcCurrentSecondsRef.current = 0;
     clockAnchorSongSecRef.current = 0;
     clockAnchorWallMsRef.current = null;
     lastDisplayedSecRef.current = -1;
     updateRunningTimeDisplay(0);
-  }, [song.id, song.scrollSpeed, song.parsed?.scrollSpeed, updateRunningTimeDisplay]);
+  }, [song.id, updateRunningTimeDisplay]);
 
   // Trigger ScrollPause directive timer
   const triggerScrollPause = useCallback((seconds: number) => {
@@ -615,28 +621,37 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           // Direct DOM progress bar update (0 React re-renders!)
           updateScrollProgressBar(exactScrollTopRef.current, scrollHeight, clientHeight);
 
-          // Pure numeric ScrollPause check against cached pause offsets (0 DOM queries!)
-          const pauses = cachedPauseItemsRef.current;
-          if (pauses.length > 0) {
-            const triggerDocY = exactScrollTopRef.current + focalOffset;
-            for (let i = 0; i < pauses.length; i++) {
-              const p = pauses[i];
-              if (p.top > triggerDocY) {
-                triggeredPausesRef.current.delete(p.id);
-              } else if (!triggeredPausesRef.current.has(p.id)) {
-                if (p.top >= exactScrollTopRef.current && p.top <= triggerDocY) {
-                  triggeredPausesRef.current.add(p.id);
-                  triggerScrollPause(p.pauseSec);
-                  break;
+          // Pure numeric ScrollPause check against cached pause offsets (skipped in LRC Sync or while Resync LRC modal is open so the clock never freezes mid-song)
+          if (!hasLrcTimestamps && !showLrcResyncModalRef.current) {
+            const pauses = cachedPauseItemsRef.current;
+            if (pauses.length > 0) {
+              const triggerDocY = exactScrollTopRef.current + focalOffset;
+              for (let i = 0; i < pauses.length; i++) {
+                const p = pauses[i];
+                if (p.top > triggerDocY) {
+                  triggeredPausesRef.current.delete(p.id);
+                } else if (!triggeredPausesRef.current.has(p.id)) {
+                  if (p.top >= exactScrollTopRef.current && p.top <= triggerDocY) {
+                    triggeredPausesRef.current.add(p.id);
+                    triggerScrollPause(p.pauseSec);
+                    break;
+                  }
                 }
               }
             }
           }
 
-          if (maxScroll > 0 && exactScrollTopRef.current >= maxScroll - 2) {
-            // Reached end of song: stop cleanly without resetting to top
-            setIsScrolling(false);
-            return;
+          // Never stop clock at bottom while Resync LRC modal is open; in LRC mode, wait until final timestamp + bottom scroll
+          if (!showLrcResyncModalRef.current) {
+            const hasRemainingLrc =
+              hasLrcTimestamps &&
+              items.length > 0 &&
+              currentSeconds < items[items.length - 1].time + 2;
+
+            if (!hasRemainingLrc && maxScroll > 0 && exactScrollTopRef.current >= maxScroll - 2) {
+              setIsScrolling(false);
+              return;
+            }
           }
         }
       }
@@ -1808,7 +1823,7 @@ export const SongViewer: React.FC<SongViewerProps> = ({
           </div>
         </div>
 
-        <div className="max-w-4xl mx-auto space-y-6 pb-40">
+        <div className="max-w-4xl mx-auto space-y-6 pb-[55vh]">
           {/* Song Header Info Card */}
           <div className="border-b border-slate-800/50 pb-4">
             <div className="flex flex-col gap-1">
